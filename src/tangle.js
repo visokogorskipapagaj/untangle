@@ -67,7 +67,7 @@ export class TangleTracker {
   }
 
   /**
-   * New crossings this gesture put on the board — the player parking a rope on top of
+   * New knots this gesture put on the board — the player parking a rope on top of
    * another one. Counted against the mark rather than the all-time low, because making a
    * fresh knot is a fact about *this* move, not about the stage's history.
    */
@@ -125,14 +125,23 @@ export class TangleTracker {
     return events;
   }
 
+  /** Crossings this one rope is currently involved in, against the whole board. */
+  knotsFor(index) {
+    let total = 0;
+    for (const rec of this.pairs.values()) {
+      if (rec.i === index || rec.j === index) total += rec.count;
+    }
+    return total;
+  }
+
   /** Crossings between two specific ropes right now. */
-  crossingsBetween(i, j) {
+  knotsBetween(i, j) {
     if (i === j) return 0;
     const rec = this.pairs.get(pairKey(Math.min(i, j), Math.max(i, j)));
     return rec ? rec.count : 0;
   }
 
-  /** Total crossings left on the board. Zero means the stage is solved. */
+  /** Total knots left on the board. Zero means the stage is solved. */
   get count() {
     let total = 0;
     for (const rec of this.pairs.values()) total += rec.count;
@@ -140,10 +149,10 @@ export class TangleTracker {
   }
 
   /**
-   * The crossing graph as an edge list — one edge per crossing rope pair. This is what
+   * The knot graph as an edge list — one edge per knotted rope pair. This is what
    * the minimum-vertex-cover solver consumes to work out the stage's ideal move count.
    */
-  crossingEdges() {
+  knotEdges() {
     const edges = [];
     for (const rec of this.pairs.values()) {
       if (rec.count > 0) edges.push([rec.i, rec.j]);
@@ -151,7 +160,7 @@ export class TangleTracker {
     return edges;
   }
 
-  /** Every remaining crossing point, for the markers the renderer draws. */
+  /** Every remaining knot, for the markers the renderer draws. */
   collectPoints(out = []) {
     out.length = 0;
     for (const rec of this.pairs.values()) {

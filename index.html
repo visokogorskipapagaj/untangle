@@ -19,9 +19,9 @@
       </div>
 
       <div class="hud__group hud__group--center">
-        <div class="stat stat--crossings">
-          <span class="stat__label">Crossings</span>
-          <span class="stat__value" id="stat-crossings">0</span>
+        <div class="stat stat--knots">
+          <span class="stat__label">Knots</span>
+          <span class="stat__value" id="stat-knots">0</span>
         </div>
         <div class="stat stat--moves">
           <span class="stat__label">Moves</span>
@@ -44,6 +44,7 @@
           <span class="stat__label">Score</span>
           <span class="stat__value" id="stat-score">0</span>
         </div>
+        <button id="btn-restart-stage" class="icon-btn" type="button" aria-label="Restart stage" title="Restart stage (R)">&#8635;</button>
         <button id="btn-settings" class="icon-btn" type="button" aria-label="Settings">&#9881;</button>
       </div>
     </header>
@@ -57,7 +58,7 @@
         <p class="lede">Pick up the ropes. Pull them apart until nothing crosses.<br>
           Every stage grants a limited number of moves. Spend fewer than you're given and
           the rest bank for later &mdash; run out of both and the stage is lost.<br>
-          Rip several crossings apart in one pull for a combo.</p>
+          Rip several knots apart in one pull for a combo.</p>
         <button id="btn-start" class="btn btn--primary" type="button">Start</button>
         <p class="hint" id="title-best"></p>
       </div>
@@ -71,6 +72,7 @@
         <dl class="breakdown">
           <div><dt>Untangles</dt><dd id="solved-untangles">0</dd></div>
           <div><dt>Best combo</dt><dd id="solved-combo">&mdash;</dd></div>
+          <div><dt>Per move</dt><dd id="solved-permove">0</dd></div>
           <div><dt>Moves</dt><dd id="solved-moves">0 / 0</dd></div>
           <div><dt>Carried over</dt><dd id="solved-carried">+0</dd></div>
           <div><dt>Bank</dt><dd id="solved-bank">0</dd></div>
@@ -109,7 +111,7 @@
         </label>
         <label class="toggle">
           <input type="checkbox" id="opt-markers" checked>
-          <span>Show crossing markers<em>Pulsing dots on every remaining crossing.</em></span>
+          <span>Show knot markers<em>Pulsing dots on every remaining knot.</em></span>
         </label>
         <div class="row">
           <button id="btn-restart" class="btn" type="button">Restart from stage 1</button>

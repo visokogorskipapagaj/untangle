@@ -4,15 +4,30 @@ import { clamp } from './geometry.js';
 /**
  * Scoring model.
  *
- *   tightness  = clamp(GAP_REF / max(gap, GAP_FLOOR), 0, TIGHT_MAX)
- *   efficiency = DRAG_REF / (DRAG_REF + dragCost)
- *   combo      = min(crossings resolved by this one gesture, COMBO.MAX)
- *   points    += BASE * tightness * efficiency * combo   per crossing resolved
- *   score      = points / max(1, moves)
+ * Two scores, deliberately measuring different things.
  *
- * Clearing a crossing by a hair beats shoving ropes into opposite corners; clearing it
- * with a precise nudge beats flailing; ripping several crossings apart in one pull beats
- * picking them off one at a time; and every extra gesture dilutes the total.
+ *   PRECISION, banked per gesture, chain or no chain:
+ *     tightness  = clamp(GAP_REF / max(gap, GAP_FLOOR), 0, TIGHT_MAX)
+ *     efficiency = DRAG_REF / (DRAG_REF + dragCost)
+ *     points    += BASE * tightness * efficiency       per knot resolved
+ *
+ *   COMBO, accrued knot by knot while a run lasts, paid when it ends:
+ *     accrued   += KNOT_VALUE * rungMultiplier(knots so far) * weight   per knot, as it lands
+ *     points    += accrued * cursedMult
+ *
+ * Clearing a knot by a hair beats shoving ropes into opposite corners and clearing it
+ * with a precise nudge beats flailing — that is what precision points price, and they land
+ * immediately whether or not a chain is running. The combo prices something else entirely:
+ * how much of the board you took apart while the clock was ticking, counted in knots. One
+ * rewards care, the other rewards pace, and mixing them into a single number made each one
+ * unreadable.
+ *
+ * Score is the raw point total, not a per-move average. Dividing by moves meant a chain
+ * payout landed at a fraction of the number the callout had just promised, and then *fell*
+ * with every move after it — points went up while the readout went down. Wasting moves is
+ * already punished by the move budget, which ends the run outright; it does not also need
+ * to retroactively devalue work the player has banked. The average survives as `perMove`
+ * on the results panel, where it reads as the efficiency stat it always was.
  *
  * Distances are normalized against the viewport diagonal *as they are banked*, not at
  * payout, so the same play scores the same on a phone and on a 32" monitor and a
@@ -33,9 +48,12 @@ export class ScoreKeeper {
     this.distanceU = 0;
     this.tightnessSum = 0;
     this.efficiencySum = 0;
+    /** Best normal rung and best cursed multiplier landed this stage. */
     this.bestCombo = 1;
-    /** Raw points held in escrow by the running chain, multiplied when it cashes out. */
-    this.pendingPoints = 0;
+    this.bestCursed = 0;
+    /** The running combo: knots taken so far, and what they have accrued. */
+    this.comboKnots = 0;
+    this.comboScore = 0;
     this.moveDistancePx = 0;
     this.moveDistanceU = 0;
     this.lastMoveDistanceU = 0;
@@ -75,13 +93,17 @@ export class ScoreKeeper {
    * landed; one gesture now gets exactly one deterministic evaluation, priced against
    * the distance that gesture actually cost.
    *
-   * Efficiency is priced against the gesture's *whole* cost, not a per-crossing share of
-   * it. Splitting the cost made a multi-clear cheaper per crossing, which rewarded
-   * exactly the same thing the combo multiplier already rewards — the two compounded and
-   * blew the scale out. The combo is the multi-clear bonus; efficiency just measures how
-   * much rope the pull cost.
+   * Efficiency is priced against the gesture's *whole* cost, not a per-knot share of
+   * it. Splitting the cost made a multi-clear cheaper per knot, which rewarded exactly
+   * the same thing the combo already rewards — the two compounded and blew the scale out.
+   * The combo is the multi-clear bonus; efficiency just measures how much rope the pull
+   * cost.
+   *
+   * These points bank immediately, chain or no chain. They price the *care* in a gesture,
+   * which the player earned whether or not a clock happened to be running; the combo is a
+   * separate pot on top, priced in knots.
    */
-  award(events, comboKilled = false, chain = 1) {
+  award(events) {
     if (!events.length) return null;
 
     const resolvedTotal = events.reduce((sum, e) => sum + e.resolved, 0);
@@ -89,12 +111,6 @@ export class ScoreKeeper {
 
     const efficiency =
       SCORING.DRAG_REF_U / (SCORING.DRAG_REF_U + this.lastMoveDistanceU);
-
-    // The rung this move reaches. It is *not* applied here — points earned during a
-    // chain are held in escrow and multiplied once, when the chain cashes out, so the
-    // whole run is worth the rung it reached rather than each move being worth the rung
-    // it happened to land on.
-    const combo = clamp(Math.round(chain) || 1, 1, COMBO.MAX);
 
     const awards = [];
     let gained = 0;
@@ -114,7 +130,7 @@ export class ScoreKeeper {
       const points = SCORING.BASE * tightness * efficiency * event.resolved;
 
       gained += points;
-      this.pendingPoints += points;
+      this.points += points;
       this.untangles += event.resolved;
       this.tightnessSum += tightness * event.resolved;
       this.efficiencySum += efficiency * event.resolved;
@@ -122,42 +138,94 @@ export class ScoreKeeper {
       awards.push({ ...event, points, tightness, efficiency });
     }
 
-    // A killed combo never counts as the stage's best — it was not landed.
-    if (!comboKilled && combo > this.bestCombo) this.bestCombo = combo;
-
-    return {
-      awards,
-      combo,
-      killed: comboKilled,
-      name: comboName(combo),
-      resolved: resolvedTotal,
-      points: gained,
-      pending: this.pendingPoints,
-    };
+    return { awards, resolved: resolvedTotal, points: gained };
   }
 
   /**
-   * Ends a chain and pays out everything it accumulated, multiplied by the rung reached.
-   *
-   * `forfeited` is a bail — the player parked a rope onto another one — and pays the pot
-   * flat. Simply letting the window lapse is a landing, not a bail: the run banks at full
-   * value. That asymmetry is the whole tension of the chain, since every extra link
-   * multiplies a pot that a single fumble drops to x1.
+   * What one knot is worth at this rung. Later knots in a run are worth more than earlier
+   * ones, which is what makes a long run worth holding.
    */
-  cashChain(rung, forfeited = false) {
-    const pot = this.pendingPoints;
-    this.pendingPoints = 0;
-    if (pot <= 0) return null;
+  rungMultiplier(rung) {
+    return 1 + Math.max(0, (Math.round(rung) || 1) - 1) * COMBO.KNOT_MULT_STEP;
+  }
 
-    const multiplier = forfeited ? 1 : clamp(Math.round(rung) || 1, 1, COMBO.MAX);
-    const paid = pot * multiplier;
+  /**
+   * Takes one knot off the board and into the running combo, returning what it was worth.
+   *
+   * Priced and added the instant it lands rather than tallied and multiplied at the end,
+   * so the number the player watches climbing is the real one — and so each knot has a
+   * value to float up into it.
+   *
+   * `weight` is the dragged rope's cost, which is exactly what its drawn thickness says:
+   * a knot picked off a triple rope is worth three of one picked off a light one. A heavy
+   * rope already costs three moves to shift, so without this the ropes that are hardest to
+   * work with were also the ones a run could least afford to touch.
+   */
+  addKnot(weight = 1) {
+    this.comboKnots += 1;
+    const gained =
+      COMBO.KNOT_VALUE * this.rungMultiplier(this.comboKnots) * Math.max(1, weight);
+    this.comboScore += gained;
+    return gained;
+  }
+
+  /** What the run is currently worth, with any cursed multiplier applied. */
+  comboValue(cursedMult = 0) {
+    if (this.comboKnots < COMBO.SHOW_FROM) return 0;
+    return this.comboScore * Math.max(1, cursedMult);
+  }
+
+  /**
+   * Ends a run and banks it.
+   *
+   * `forfeited` is a bail — the player parked a rope onto another one — and strips the
+   * cursed multiplier, paying only what the knots accrued. Letting the window lapse is a
+   * landing, not a bail: the run banks in full. That asymmetry is the whole tension, since
+   * turning a long run onto the curse multiplies a number a single fumble flattens.
+   *
+   * A lone knot is not a run and pays nothing — the gesture that took it already banked
+   * its precision points, and paying a one-knot "combo" would make the count meaningless.
+   */
+  cashCombo(cursedMult = 0, forfeited = false) {
+    const knots = this.comboKnots;
+    const accrued = this.comboScore;
+    this.comboKnots = 0;
+    this.comboScore = 0;
+    if (knots < COMBO.SHOW_FROM) return null;
+
+    const cursed = forfeited ? 1 : Math.max(1, cursedMult);
+    const paid = accrued * cursed;
     this.points += paid;
 
-    return { pot, rung: clamp(Math.round(rung) || 1, 1, COMBO.MAX), multiplier, paid, forfeited };
+    if (!forfeited) {
+      if (knots > this.bestCombo) this.bestCombo = knots;
+      if (cursed > this.bestCursed) this.bestCursed = cursed;
+    }
+
+    return { knots, accrued, cursed, paid, forfeited };
   }
 
   get score() {
+    return this.points;
+  }
+
+  /** Points per gesture — how economically the stage was played, not what it was worth. */
+  get perMove() {
     return this.points / Math.max(1, this.moves);
+  }
+
+  /**
+   * What the score reads *right now*: banked points, plus what the running chain would pay
+   * if it landed here.
+   *
+   * The pot is the player's — it is simply not final yet. Reading a flat banked total
+   * while a chain ran left the score frozen through the best play in the game and then
+   * jumping by a number that had been sitting in escrow all along. Projecting it means the
+   * readout climbs with every link, the cash-out is a no-op, and a bail is visible as
+   * exactly what it is: the score collapsing back to what was already banked.
+   */
+  projected(cursedMult = 0) {
+    return this.points + this.comboValue(cursedMult);
   }
 
   get avgTightness() {
@@ -169,8 +237,40 @@ export class ScoreKeeper {
   }
 }
 
-export function comboName(combo) {
-  return COMBO.NAMES[Math.min(combo, COMBO.MAX)] || '';
+/**
+ * The ladder name for a *cursed* multiplier — `×4` is `QUADRUPLE`, `×10` is the top of the
+ * ladder, which is also the rung that detonates the rope.
+ *
+ * The names belong to the curse and nothing else. They used to name the knot rung, which
+ * put two `×` numbers on a cursed callout eight pixels apart — one that multiplied the pot
+ * and one that only counted knots — and made them look like the same kind of quantity. The
+ * knot rung is a count, so it is shown as a count or not at all; the cursed multiplier is
+ * the number that actually multiplies, so it is the one worth naming.
+ *
+ * The multiplier has no ceiling — it climbs by the weight of each rope pulled off the curse
+ * and a triple can vault it past MAX — so anything above the top of the ladder keeps the
+ * last name.
+ */
+export function comboName(cursedMult) {
+  return COMBO.NAMES[Math.min(cursedMult, COMBO.MAX)] || '';
+}
+
+/**
+ * What one haul out of a curse's field is worth to the cursed multiplier: one for the haul
+ * itself, plus the rope's own weight.
+ *
+ * The multiplier starts neutral at 1, so the rope that *opens* the combo is worth exactly
+ * what every rope after it is worth — it used to open at a flat x2 and throw its weight
+ * away, which made hauling a triple off the curse first strictly worse than hauling it
+ * second, for no reason a player could see.
+ *
+ * The `+1` is what makes the mechanic reachable. A curse's field is a shrinking pool —
+ * every rope in it can be harvested once, since putting one back is a fresh knot and a
+ * fumble — so the ceiling on a stage is fixed at generation time. Paying only the weight
+ * meant a debut stage topped out around x5 against a x10 detonation.
+ */
+export function cursedStep(weight = 1) {
+  return 1 + Math.max(1, weight);
 }
 
 /**
@@ -178,7 +278,9 @@ export function comboName(combo) {
  * Every rung tightens the window, so holding a long chain gets progressively harder.
  */
 export function comboWindow(chain) {
-  const rungs = Math.max(0, chain - 1);
+  // Flat past DECAY_FLOOR_RUNG. The rung itself has no ceiling, so letting the window keep
+  // tightening forever would have put one back in by the side door.
+  const rungs = Math.max(0, Math.min(chain, COMBO.DECAY_FLOOR_RUNG) - 1);
   return Math.max(COMBO.WINDOW_MIN_MS, COMBO.WINDOW_MS * COMBO.WINDOW_DECAY ** rungs);
 }
 

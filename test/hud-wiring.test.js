@@ -8,6 +8,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const html = readFileSync(join(root, 'index.html'), 'utf8');
 const hudSource = readFileSync(join(root, 'src/hud.js'), 'utf8');
 
+const mainSource = readFileSync(join(root, 'src/main.js'), 'utf8');
+
 const htmlIds = new Set([...html.matchAll(/id="([A-Za-z0-9_-]+)"/g)].map((m) => m[1]));
 const lookedUp = [...hudSource.matchAll(/\$\('([A-Za-z0-9_-]+)'\)/g)].map((m) => m[1]);
 
@@ -46,7 +48,7 @@ test('no text-bearing stat key points at a layout container', () => {
   const containers = new Set(['stage', 'hud', 'canvas']);
   const map = elementMapSource();
 
-  const statKeys = ['stage', 'crossings', 'movesLeft', 'bank', 'distance', 'score'];
+  const statKeys = ['stage', 'knots', 'movesLeft', 'bank', 'distance', 'score'];
   for (const key of statKeys) {
     const match = map.match(new RegExp(`^ {6}${key}: \\$\\('([A-Za-z0-9_-]+)'\\)`, 'm'));
     assert.ok(match, `setStats writes to this.el.${key}, so the map must define it`);
@@ -62,6 +64,38 @@ test('the settings toggles are wired to real inputs', () => {
     assert.ok(htmlIds.has(id), `${id} must exist`);
     assert.ok(hudSource.includes(`$('${id}')`), `${id} must be wired in hud.js`);
   }
+});
+
+test('every handler the HUD calls is one main.js actually supplies', () => {
+  // A renamed handler fails silently until someone clicks the thing: the listener is
+  // bound either way, and `handlers.onWhatever is not a function` only lands at click
+  // time, on a button that looks perfectly fine sitting there.
+  const called = new Set(
+    [...hudSource.matchAll(/handlers\.(on[A-Za-z0-9]*)\(/g)].map((m) => m[1]),
+  );
+  assert.ok(called.size >= 5, 'sanity: handler calls were parsed');
+
+  const start = mainSource.indexOf('new Hud({');
+  assert.ok(start > -1, 'main.js should construct the HUD');
+  const supplied = new Set(
+    [...mainSource.slice(start).matchAll(/^ {2}(on[A-Za-z0-9]*):/gm)].map((m) => m[1]),
+  );
+
+  const missing = [...called].filter((name) => !supplied.has(name));
+  assert.deepEqual(missing, [], `hud.js calls handlers main.js never passes: ${missing}`);
+});
+
+test('the restart-stage button sits to the left of the settings button', () => {
+  const right = html.slice(
+    html.indexOf('hud__group--right'),
+    html.indexOf('</header>'),
+  );
+  const restart = right.indexOf('id="btn-restart-stage"');
+  const settings = right.indexOf('id="btn-settings"');
+
+  assert.ok(restart > -1, 'the restart-stage button belongs in the right-hand HUD group');
+  assert.ok(settings > -1, 'and so does settings');
+  assert.ok(restart < settings, 'restart comes first, so it renders to the left');
 });
 
 test('every button the HUD binds exists, and every overlay it toggles exists', () => {

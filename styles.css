@@ -88,8 +88,8 @@ html, body {
   line-height: 1.2;
   white-space: nowrap;
 }
-.stat--crossings .stat__value { color: var(--warn); }
-.stat--crossings.is-clear .stat__value { color: var(--accent); }
+.stat--knots .stat__value { color: var(--warn); }
+.stat--knots.is-clear .stat__value { color: var(--accent); }
 .stat--score .stat__value { color: var(--accent); }
 
 /* Running low on moves, then burning through banked ones, are the two states the player
@@ -142,6 +142,11 @@ html, body {
 }
 .chain-meter.is-live { opacity: 1; }
 
+/* Priming: the starter is half done and the clock is running, but nothing is at stake
+   yet. Thin and muted, so the bar reads as a countdown rather than a pot. */
+.chain-meter.is-priming { height: 2px; opacity: 0.55; }
+.chain-meter.is-priming i { background: rgba(159, 180, 216, 0.75); }
+
 .chain-meter i {
   display: block;
   height: 100%;
@@ -160,6 +165,21 @@ html, body {
 .chain-meter.is-critical i { background: var(--warn); }
 .chain-meter.is-critical { animation: chain-buzz 80ms linear infinite; }
 
+/* CURSED COMBO: the window burns down twice as fast, so the meter must stop reading as
+   the same meter. It doubles in height and blinks — a hard step, not a fade, because a
+   smooth pulse is exactly what the eye stops noticing. Declared after .is-critical so it
+   wins the equal-specificity tie; the two states compose in the combined rule below. */
+.chain-meter.is-cursed {
+  height: 8px;
+  animation: chain-blink 280ms steps(1, end) infinite;
+}
+.chain-meter.is-cursed i { background: var(--warn); box-shadow: 0 0 12px rgba(255, 122, 107, 0.9); }
+/* Both at once: blink on opacity, buzz on transform, so neither animation clobbers the
+   other's property. */
+.chain-meter.is-cursed.is-critical {
+  animation: chain-blink 150ms steps(1, end) infinite, chain-buzz 80ms linear infinite;
+}
+
 @keyframes chain-buzz {
   0%, 100% { transform: translate(0, 0); }
   25%      { transform: translate(-3px, 1px); }
@@ -167,8 +187,17 @@ html, body {
   75%      { transform: translate(-2px, -1px); }
 }
 
+@keyframes chain-blink {
+  0%, 49%   { opacity: 1; }
+  50%, 100% { opacity: 0.28; }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .chain-meter.is-critical { animation: none; }
+  .chain-meter.is-critical,
+  .chain-meter.is-cursed,
+  .chain-meter.is-cursed.is-critical { animation: none; }
+  /* The height change carries the state on its own when motion is off. */
+  .chain-meter.is-cursed { opacity: 1; }
 }
 
 @keyframes delta-drop {
@@ -214,6 +243,8 @@ html, body {
   cursor: pointer;
 }
 .icon-btn:hover { color: var(--ink); border-color: rgba(232, 236, 244, 0.3); }
+/* Icon buttons sit as a pair, closer to each other than to the stats they follow. */
+.icon-btn + .icon-btn { margin-left: 8px; }
 
 /* ---------- Overlays ---------- */
 

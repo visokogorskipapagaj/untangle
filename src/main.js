@@ -1,3 +1,4 @@
+import { STAGE } from './config.js';
 import { Game } from './game.js';
 import { Hud } from './hud.js';
 import { attachInput } from './input.js';
@@ -8,6 +9,28 @@ const params = new URLSearchParams(location.search);
 const debug = params.get('debug') === '1';
 const seedParam = params.get('seed');
 const stageParam = params.get('stage');
+
+/**
+ * Is this a phone, as opposed to a tablet or a touch laptop?
+ *
+ * Both halves are needed. A coarse pointer alone catches every tablet and touchscreen
+ * laptop, which have the room for a full board; a small screen alone catches a narrow
+ * desktop window, and the player who drags their window narrow has not changed device.
+ * The screen is measured rather than the window, so rotating the phone or the URL bar
+ * sliding away cannot change what kind of device it is halfway through a run.
+ *
+ * `?phone=1` (or `=0`) forces it, which is how this gets tested without a phone.
+ */
+function isPhone() {
+  const forced = params.get('phone');
+  if (forced !== null) return forced === '1';
+
+  const coarse = window.matchMedia?.('(pointer: coarse)')?.matches ?? false;
+  const shortest = Math.min(window.screen?.width || 0, window.screen?.height || 0);
+  return coarse && shortest > 0 && shortest <= STAGE.PHONE_MAX_EDGE_PX;
+}
+
+const phone = isPhone();
 
 // A fixed seed makes a whole run reproducible, which is what `?seed=123&stage=7` is for.
 const baseSeed =
@@ -25,14 +48,15 @@ const hud = new Hud({
   onGameOverRetry: () => game.retryAfterGameOver(),
   onRestart: () => game.restart(),
   onOptions: (options) => game.setOptions(options),
-  // The hotkey, unlike the button, has to refuse while a dialog is up or a rope is held.
-  onHotkeyRetry: () => {
+  // The in-play restart — the HUD button and the R key — unlike the one on the results
+  // panel, has to refuse while a dialog is up or a rope is held.
+  onRestartStage: () => {
     if (game.canRetry) game.retryStage();
   },
 });
 hud.setOptions(progress.options);
 
-const game = new Game({ renderer, hud, progress, baseSeed, debug });
+const game = new Game({ renderer, hud, progress, baseSeed, debug, phone });
 
 attachInput(canvas, {
   onGrab: (x, y, isTouch) => game.onGrab(x, y, isTouch),
@@ -69,7 +93,9 @@ if (stageParam !== null) {
 }
 
 if (debug) {
-  console.info(`[untangle] seed=${baseSeed} — replay with ?seed=${baseSeed}&stage=<n>&debug=1`);
+  console.info(
+    `[untangle] seed=${baseSeed} phone=${phone} — replay with ?seed=${baseSeed}&stage=<n>&debug=1`,
+  );
 }
 
 // Debug handles. Poke at a live stage from the browser console — `__game.chain = 9`,

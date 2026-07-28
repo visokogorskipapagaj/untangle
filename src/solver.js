@@ -8,8 +8,8 @@ import { MOVES } from './config.js';
  * nothing, and the fewest moves that can solve a stage is the smallest set of ropes
  * whose removal leaves the rest crossing-free.
  *
- * That is exactly **minimum vertex cover** on the crossing graph: ropes are vertices,
- * a crossing pair is an edge, and what remains after removing a cover is by definition
+ * That is exactly **minimum vertex cover** on the knot graph: ropes are vertices,
+ * a knotted pair is an edge, and what remains after removing a cover is by definition
  * an independent set — no two ropes crossing.
  *
  * NP-hard in general, trivial here: branch-and-bound over bitmasks is exact and
@@ -90,13 +90,13 @@ export function minimumVertexCover(vertexCount, edges, weights = null) {
  * The stage's move budget.
  *
  * `ideal` is the true minimum widened by MOVES.SLACK, so par is demanding but humanly
- * reachable rather than requiring provably optimal play. `bonus` is the crossing-count
+ * reachable rather than requiring provably optimal play. `bonus` is the knot-count
  * cushion. Their sum is what the player is granted; the leftover banks.
  */
-export function moveBudgetFor(ropeCount, edges, crossings, weights = null) {
+export function moveBudgetFor(ropeCount, edges, knots, weights = null) {
   const cover = minimumVertexCover(ropeCount, edges, weights);
   const ideal = Math.max(1, Math.ceil(cover * MOVES.SLACK));
   const bonus =
-    MOVES.CROSSINGS_PER_BONUS > 0 ? Math.floor(crossings / MOVES.CROSSINGS_PER_BONUS) : 0;
+    MOVES.KNOTS_PER_BONUS > 0 ? Math.floor(knots / MOVES.KNOTS_PER_BONUS) : 0;
   return { cover, ideal, bonus, budget: ideal + bonus };
 }

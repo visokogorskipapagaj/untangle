@@ -5,7 +5,7 @@ import { MoveBudget } from './moves.js';
 import { colorConvergence, stagePalette } from './palette.js';
 import { saveProgress } from './progress.js';
 import { makeRng, hashSeed } from './rng.js';
-import { comboName, comboWindow, ScoreKeeper } from './scoring.js';
+import { comboName, comboWindow, cursedStep, ScoreKeeper } from './scoring.js';
 import { TangleTracker } from './tangle.js';
 
 const MAX_DT = 50; // ms — a backgrounded tab must not fast-forward the settle
@@ -22,16 +22,27 @@ const BANNER_HOLD_MS = 950;
 /** A killed combo needs longer — it has to shake, then fall out of frame. */
 const KILLED_BANNER_MS = 1500;
 
+/** How long the cursed readout's jump lasts each time the multiplier climbs. */
+const CURSED_POP_MS = 340;
+
 /** Largest slice of a drag applied before length constraints run again. */
 const SUBSTEP_LIMIT = 8;
 
+/**
+ * Where the combo total sits, and therefore where knot scores fly to. Directly under the
+ * decay bar: the bar is how long you have, the number below it is what you would lose.
+ */
+const COMBO_ANCHOR_Y = 128;
+
 export class Game {
-  constructor({ renderer, hud, progress, baseSeed, debug }) {
+  constructor({ renderer, hud, progress, baseSeed, debug, phone = false }) {
     this.renderer = renderer;
     this.hud = hud;
     this.progress = progress;
     this.baseSeed = baseSeed;
     this.debug = debug;
+    /** Phones play a thinned board — see STAGE.PHONE_SCALE. Fixed for the whole run. */
+    this.phone = phone;
 
     this.state = 'title';
     this.stage = 1;
@@ -44,17 +55,21 @@ export class Game {
     this.score = new ScoreKeeper();
     this.budget = new MoveBudget();
     this.stageScores = new Map();
-    this.crossingPoints = [];
+    this.knotMarkers = [];
     this.flashes = [];
     this.banner = null;
     this.pending = null;
     this.explosions = [];
 
-    /** Consecutive moves that untangled something — the skate-style chain. */
+    /** Normal rung: 0 nothing, 1 primed (starter half-done), >=2 a live chain. */
     this.chain = 0;
+    /** 0 while normal; >=COMBO.CURSED_BASE once the curse has taken the chain over. */
+    this.cursedMult = 0;
+    /** Which black rope the run is feeding on, and therefore which one a x10 blows. */
+    this.curseTarget = -1;
+    /** Counts down after each climb of the multiplier; drives the readout's jump. */
+    this.cursedPop = 0;
     this.chainTimer = 0;
-    this.cashBanner = false;
-    this.lastMoveCost = 1;
 
     this.grab = null;
     this.settle = null;
@@ -75,11 +90,12 @@ export class Game {
     this.banner = null;
     this.pending = null;
     this.chain = 0;
+    this.cursedMult = 0;
+    this.curseTarget = -1;
+    this.cursedPop = 0;
     this.chainTimer = 0;
-    this.cashBanner = false;
-    this.lastMoveCost = 1;
 
-    // A layout that generated with zero crossings would be solved on arrival; walk the
+    // A layout that generated with zero knots would be solved on arrival; walk the
     // seed forward until we get a real puzzle.
     let info = null;
     for (let attempt = 0; attempt < 6; attempt++) {
@@ -88,8 +104,9 @@ export class Game {
         this.width,
         this.height,
         hashSeed(this.baseSeed + attempt * 7919, stage),
+        { phone: this.phone },
       );
-      if (info.crossings > 0) break;
+      if (info.knots > 0) break;
     }
 
     this.stageInfo = info;
@@ -109,7 +126,7 @@ export class Game {
     this.tracker = new TangleTracker(this.ropes);
     this.score.beginStage(Math.hypot(this.width, this.height));
     this.budget.beginStage(info.moves.ideal, info.moves.bonus);
-    this.tracker.collectPoints(this.crossingPoints);
+    this.tracker.collectPoints(this.knotMarkers);
     this.state = 'playing';
   }
 
@@ -169,7 +186,7 @@ export class Game {
   }
 
   /**
-   * Uniform scale about the centre: every crossing is preserved exactly, so resizing
+   * Uniform scale about the centre: every knot is preserved exactly, so resizing
    * mid-stage can neither hand the player a solved board nor invent new work.
    */
   resize(width, height) {
@@ -203,7 +220,7 @@ export class Game {
       // Refresh geometry only. A resize must never award or ratchet — the ratchet is
       // monotone, so an event swallowed here could never be recovered.
       this.tracker.recountAll();
-      this.tracker.collectPoints(this.crossingPoints);
+      this.tracker.collectPoints(this.knotMarkers);
     }
   }
 
@@ -211,7 +228,7 @@ export class Game {
 
   onGrab(x, y, isTouch) {
     // Land any in-flight settle before deciding anything: it can be the thing that
-    // clears the last crossing, and grabbing onto a stage that just ended would leave
+    // clears the last knot, and grabbing onto a stage that just ended would leave
     // a rope held underneath the results panel.
     this.#finishSettle();
     if (this.state !== 'playing' || this.hud.anyOverlayOpen) return false;
@@ -254,6 +271,10 @@ export class Game {
       // Locked in at grab time: the price the player agreed to when they picked it up,
       // not whatever the board happens to charge by the time they let go.
       cost,
+      // Same reason — which curse's field this drag is pulling out of is decided by the
+      // board the player looked at, not by whatever the settle leaves behind.
+      curse: this.#cursedField(best.ropeIndex),
+      weight: rope.weight,
       offsetX: x - node.x,
       offsetY: y - node.y,
       lastX: x,
@@ -275,22 +296,35 @@ export class Game {
 
   onRelease() {
     if (!this.grab) return;
-    const { ropeIndex, cost } = this.grab;
+    const { ropeIndex, cost, curse, weight } = this.grab;
     this.grab = null;
 
     // A tap that moved nothing is not a move. Letting it through would run a settle,
-    // and settle motion can resolve crossings — handing out free untangles that cost
+    // and settle motion can resolve knots — handing out free untangles that cost
     // neither a move nor any travel.
     if (!this.score.endMove()) return;
 
     this.budget.spend(cost);
-    // A rope's move cost is also what it contributes to the chain: hauling a double
-    // rope advances two rungs, so the expensive ropes are the fast way up the ladder.
-    this.lastMoveCost = cost;
     if (cost > 1) this.hud.showMoveDelta(-cost);
     // Touching the cursed rope should feel like a mistake you can physically feel.
     if (this.ropes[ropeIndex].cursed) this.hud.shudder();
-    this.settle = { ropeIndex, remaining: ROPE.SETTLE_MS };
+
+    this.settle = {
+      ropeIndex,
+      remaining: ROPE.SETTLE_MS,
+      curse,
+      weight,
+      // Both verdicts are latched here, at the drop, and #endGesture is handed them
+      // rather than re-deriving them when the settle finishes ~220ms later.
+      //
+      // The deadline is about when the player let go: a rope released with a tenth of a
+      // second to spare has landed, and the clock running on through the settle must not
+      // be able to take that back. The fumble is about where they let go: the settle is
+      // unscored relaxation the game applies, so a rope that drifts onto a neighbour
+      // during it is not the player parking it there.
+      late: this.#chainRunning() && this.chainTimer <= 0,
+      created: this.tracker.createdSinceMark(),
+    };
   }
 
   /**
@@ -303,28 +337,152 @@ export class Game {
   #moveCost(index) {
     const rope = this.ropes[index];
     if (rope.cursed) return CURSED.GRAB_COST;
-
-    const cursed = this.ropes.findIndex((r) => r.cursed && !r.removed);
-    const taxed = cursed >= 0 && this.tracker.crossingsBetween(index, cursed) > 0;
-    return rope.weight * (taxed ? CURSED.DRAG_TAX : 1);
+    return rope.weight * (this.#cursedField(index) >= 0 ? CURSED.DRAG_TAX : 1);
   }
 
-  /** Cost of the cheapest rope still on the board. */
+  /** Any cursed rope still on the board, or -1. Only used as a fallback. */
+  #anyCursedIndex() {
+    return this.ropes.findIndex((rope) => rope.cursed && !rope.removed);
+  }
+
+  /**
+   * Which cursed rope this one is caught on — still crossing it, and so taxed to double
+   * move cost — or -1 for none. That tax is also what starts a CURSED COMBO, and the rope
+   * it names is the one a x10 will detonate.
+   *
+   * A late board carries several black ropes, and the first one found is enough: the tax
+   * is flat, so being caught on two is no more expensive than being caught on one.
+   * Compounding it put ordinary ropes beyond the entire move budget, which reads as a
+   * broken stage rather than a hard one.
+   *
+   * A black rope is deliberately *not* in its own field, nor in another black rope's.
+   * Folding that in would make grabbing one worth six rungs, when the entire point of
+   * repricing it was that it should be worth three.
+   */
+  #cursedField(index) {
+    if (this.ropes[index].cursed) return -1;
+    for (let k = 0; k < this.ropes.length; k++) {
+      const rope = this.ropes[k];
+      if (!rope.cursed || rope.removed) continue;
+      if (this.tracker.knotsBetween(index, k) > 0) return k;
+    }
+    return -1;
+  }
+
+  // --- the combo ------------------------------------------------------------------------
+
+  /** A run exists from the first knot onward — that is when the clock starts. */
+  #chainRunning() {
+    return this.chain >= 1;
+  }
+
+  #cursed() {
+    return this.cursedMult >= COMBO.CURSED_BASE;
+  }
+
+  /** How fast the window burns. A cursed combo doubles the reward and the pressure both. */
+  #burnRate() {
+    return this.#cursed() ? COMBO.CURSED_BURN : 1;
+  }
+
+  /**
+   * One qualifying drop.
+   *
+   * Every knot it took off the board is a rung and is banked into the run at once, priced
+   * by the weight of the rope that was dragged: knots come off a triple rope worth three
+   * times what they are worth off a light one. If the drop came out of the curse's field
+   * and a run was already going, the cursed multiplier opens (or climbs, by the rope's
+   * weight) — it multiplies the whole run, so there is nothing to multiply if no run is
+   * live, and it cannot be started cold.
+   *
+   * `curse` is the black rope this drop was pulled off, or -1. It is remembered as the
+   * run's target: on a board carrying several, the one that detonates at x10 has to be the
+   * one the run was actually fed on, not whichever happens to sit first in the array.
+   */
+  #advance(points, curse, weight) {
+    const running = this.chain >= 1;
+
+    for (const point of points) {
+      const gained = this.score.addKnot(weight);
+      this.chain += 1;
+      // Once the run is a combo the score flies up into the total; before that there is no
+      // total to fly into, so it just rises where it was earned.
+      this.flashes.push({
+        x: point.x,
+        y: point.y,
+        toX: this.width / 2,
+        toY: COMBO_ANCHOR_Y,
+        fly: this.chain >= COMBO.SHOW_FROM,
+        text: `+${Math.round(gained)}`,
+        life: FLASH_MS,
+        total: FLASH_MS,
+      });
+    }
+
+    if (curse < 0) return;
+    // The cursed multiplier acts on the whole run, so there has to *be* a run: it cannot
+    // be opened cold, only on top of one already going.
+    if (!this.#cursed() && !running) return;
+    // Neutral at 1, and every rope hauled out of the field is worth the same as every
+    // other — the opener included. See cursedStep.
+    this.cursedMult = (this.#cursed() ? this.cursedMult : 1) + cursedStep(weight);
+    this.curseTarget = curse;
+    // The multiplier climbing *is* the reward, and a number that changes in place is easy
+    // to miss underneath the shake the cursed readout already carries. Only fires when the
+    // multiplier moves — an ordinary knot taken mid-curse climbs the rung, not this.
+    this.cursedPop = CURSED_POP_MS;
+  }
+
+  /** One point per knot resolved, at the midpoint between the two ropes it joined. */
+  #knotPoints(events) {
+    const points = [];
+    for (const event of events) {
+      const a = midpointOf(this.ropes[event.i]);
+      const b = midpointOf(this.ropes[event.j]);
+      for (let k = 0; k < event.resolved; k++) {
+        points.push({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+      }
+    }
+    return points;
+  }
+
+  /**
+   * Cost of the cheapest rope that is actually still in the player's way.
+   *
+   * Restricted to ropes still involved in a knot — those are the only ones anyone has
+   * to move. Counting every rope on the board meant a stage where each *knotted* rope cost
+   * more than the moves left still read as playable, because some rope lying clear in a
+   * corner was cheap. That is not a reprieve, it is a deadlock: onGrab refuses any rope
+   * the player cannot pay for, so they are left shuffling the one rope that changes
+   * nothing until they give up. One move left and only double ropes knotted is a loss, and
+   * the game should say so.
+   */
   #cheapestMove() {
     let cheapest = Infinity;
     for (let i = 0; i < this.ropes.length; i++) {
       if (this.ropes[i].removed) continue;
+      if (this.tracker.knotsFor(i) === 0) continue;
       cheapest = Math.min(cheapest, this.#moveCost(i));
     }
     return cheapest === Infinity ? 1 : cheapest;
   }
 
   /**
-   * Blows the cursed rope off the board, free of charge. It stays in the ropes array so
+   * Blows a cursed rope off the board, free of charge. It stays in the ropes array so
    * every pair index the tracker holds stays valid — it is simply no longer on the board.
+   *
+   * The one that goes is the one the run was built on. On a late board carrying four, any
+   * other choice means the player farms the black rope in front of them and a different one
+   * explodes across the screen — the payoff has to land where the work was done. The
+   * fallback is defensive only: a cursed rope leaves the board by detonating and nothing
+   * else, and a run detonates once.
    */
   #detonateCursed() {
-    const index = this.ropes.findIndex((rope) => rope.cursed && !rope.removed);
+    const target = this.curseTarget;
+    const index =
+      target >= 0 && this.ropes[target]?.cursed && !this.ropes[target].removed
+        ? target
+        : this.#anyCursedIndex();
     if (index < 0) return false;
 
     const rope = this.ropes[index];
@@ -349,6 +507,7 @@ export class Game {
       this.flashes[i].life -= dt;
       if (this.flashes[i].life <= 0) this.flashes.splice(i, 1);
     }
+    if (this.cursedPop > 0) this.cursedPop = Math.max(0, this.cursedPop - dt);
     if (this.banner) {
       this.banner.life -= dt;
       if (this.banner.life <= 0) this.banner = null;
@@ -362,30 +521,38 @@ export class Game {
       if (this.pending.delay <= 0) this.#finishStage();
     }
 
-    // The chain window only runs *between* moves. Holding a rope, or waiting on its
-    // settle, is being mid-trick — a deliberate two-second drag must not break a chain
-    // the player is actively landing.
-    if (this.chain > 0 && !this.grab && !this.settle && this.state === 'playing') {
-      this.chainTimer -= dt;
-      // Letting the window lapse is a landing, not a bail — the pot banks at full value.
-      if (this.chainTimer <= 0) this.#cashChain(false);
+    // The window runs in real time from the *priming* drop — while the player is thinking,
+    // while they are holding a rope, and while it settles. Starting it only at x2 is what
+    // made a double reachable at a stroll: the first link sat armed indefinitely, so any
+    // second drop, whenever it came, opened the chain. The clock has to be running for the
+    // starter itself, or the starter is not a starter.
+    if (this.#chainRunning() && this.state === 'playing') {
+      this.chainTimer = Math.max(0, this.chainTimer - dt * this.#burnRate());
+      // Only an *idle* lapse cashes here. A rope already dropped is a landing #endGesture
+      // has not scored yet — it latched its own verdict at the drop — and a rope still in
+      // hand is a move not yet made. Cashing under either would kill a chain from behind.
+      if (this.chainTimer <= 0 && !this.grab && !this.settle) this.#cashCombo(false);
     }
 
-    const crossings = this.tracker ? this.tracker.count : 0;
+    const knots = this.tracker ? this.tracker.count : 0;
 
     this.hud.setStats({
       stage: this.stage,
-      crossings,
+      knots,
       movesLeft: this.budget.stageLeft,
       bank: this.budget.bankLeft,
       // The alarm is about the *next* move, not the last one. Once the stage grant is
       // spent and knots are still on the board, every further move comes out of savings
       // — so the warning has to be up before the player commits to one, not after.
-      drawingFromBank: this.budget.stageLeft === 0 && crossings > 0,
+      drawingFromBank: this.budget.stageLeft === 0 && knots > 0,
       distancePx: this.score.distancePx,
-      score: this.score.score,
+      // Projected, not banked: the pot is the player's, it is just not final yet.
+      score: this.score.projected(this.cursedMult),
       chain: this.chain,
-      chainFraction: this.chain > 0 ? this.chainTimer / comboWindow(this.chain) : 0,
+      cursedMult: this.cursedMult,
+      chainFraction: this.#chainRunning()
+        ? this.chainTimer / comboWindow(this.chain)
+        : 0,
     });
   }
 
@@ -399,7 +566,7 @@ export class Game {
 
     // A flick can move further in one frame than a segment is long, and eight
     // relaxation passes cannot absorb that in one go — the rope visibly stretches and
-    // crossings get counted against a shape it never really had. Walking the delta in
+    // knots get counted against a shape it never really had. Walking the delta in
     // segment-sized slices keeps the chain taut.
     const steps = clamp(Math.ceil(Math.hypot(dx, dy) / rope.segLen), 1, SUBSTEP_LIMIT);
     const startX = this.grab.lastX;
@@ -426,7 +593,7 @@ export class Game {
     // big rope really does cost more than nudging a small one.
     this.score.addDistance(rope.travelSinceSnapshot());
     this.tracker.recount(this.grab.ropeIndex);
-    this.tracker.collectPoints(this.crossingPoints);
+    this.tracker.collectPoints(this.knotMarkers);
   }
 
   /**
@@ -441,7 +608,7 @@ export class Game {
     rope.constrain(ROPE.SETTLE_PASSES);
     keepInside(rope, this.width, this.height, this.margin);
     this.tracker.recount(this.settle.ropeIndex);
-    this.tracker.collectPoints(this.crossingPoints);
+    this.tracker.collectPoints(this.knotMarkers);
 
     this.settle.remaining -= dt;
     if (this.settle.remaining <= 0) this.#finishSettle();
@@ -449,33 +616,51 @@ export class Game {
 
   #finishSettle() {
     if (!this.settle) return;
+    const gesture = this.settle;
     this.settle = null;
-    this.#endGesture();
+    this.#endGesture(gesture);
   }
 
   /**
-   * Ends the running chain and pays out its escrowed pot at the rung it reached.
+   * Ends the running chain and banks its pot.
    *
-   * Every route out of a chain funnels through here — a fumble, a move that untangled
-   * nothing, the window lapsing, and the stage ending — so the pot can never be stranded.
+   * Every route out funnels through here — a fumble, a drop that untangled nothing, the
+   * window lapsing, turning off the curse, and the stage ending — so the pot can never be
+   * stranded. A chain still in its starter has nothing to pay and goes quietly.
    */
-  #cashChain(forfeited, rung = this.chain) {
-    const cash = this.score.cashChain(rung, forfeited);
+  #cashCombo(forfeited) {
+    const rung = this.chain;
+    const cursedMult = this.cursedMult;
+    const wasCursed = this.#cursed();
+
+    const cash = this.score.cashCombo(cursedMult, forfeited);
     this.chain = 0;
+    this.cursedMult = 0;
+    // The target dies with the run that chose it: the next run picks its own black rope.
+    this.curseTarget = -1;
+    // A jump left mid-flight would land on whatever the next run puts in the slot.
+    this.cursedPop = 0;
     this.chainTimer = 0;
     if (!cash) return null;
 
+    // The one and only callout a combo gets. It used to fire twice — once on landing the
+    // rung and again on cashing it — which read as landing the same double or triple back
+    // to back. The climb is already on screen continuously in the CHAIN readout; the
+    // banner is for the moment it pays.
     const life = cash.forfeited ? KILLED_BANNER_MS : BANNER_MS;
     this.banner = {
-      text: comboName(cash.rung),
-      multiplier: `×${cash.rung}`,
+      // Same wording as the live indicator it replaces, so the slot reads as resolving.
+      multiplier: wasCursed ? `CURSED COMBO ×${cursedMult}` : `${rung} KNOTS`,
+      // The ladder name is the curse's flourish and only the curse's, and it names the
+      // *cursed* multiplier — the number already in the headline above it. A normal run
+      // says what it was, the knot count, and nothing more.
+      text: wasCursed ? comboName(cursedMult) : '',
       payout: `+${Math.round(cash.paid).toLocaleString()}`,
       killed: cash.forfeited,
+      cursed: wasCursed,
       life,
       total: life,
     };
-    // Tells #endGesture not to overwrite this with a per-move callout.
-    this.cashBanner = true;
     return cash;
   }
 
@@ -484,69 +669,53 @@ export class Game {
    * place the stage can end — which is what makes a move's value independent of frame
    * timing, and what stops a fast whip banking points on a separation that did not last.
    */
-  #endGesture() {
-    // Did this move put a fresh knot on the board? If so the chain is forfeit — you
-    // untangled several ropes and then parked the one you were holding on another.
-    const created = this.tracker.createdSinceMark();
+  #endGesture(gesture) {
+    // Both latched at the drop by onRelease. Did this move put a fresh knot on the board
+    // — you untangled several ropes and then parked the one you were holding on another —
+    // and was the rope let go of before the window ran out?
+    const { created, late, curse, weight } = gesture;
     let events = this.tracker.commit();
-    const resolved = events.reduce((sum, e) => sum + e.resolved, 0);
+    let resolved = events.reduce((sum, e) => sum + e.resolved, 0);
 
-    const landed = resolved > 0 && created === 0;
-    // The rung this move reaches. A move advances the chain by what the rope cost, so a
-    // bail reports what it would have been and the killed callout can show the player
-    // the chain they just dropped.
-    const link = resolved > 0 ? this.chain + this.lastMoveCost : 0;
+    // The window ran out while the rope was in the air. That ends whatever was running —
+    // letting it lapse is a landing, so it banks in full — but this drop is still clean in
+    // its own right and primes a *new* chain. Cashing here, before its knots are counted,
+    // is what keeps the two runs separate.
+    if (late) this.#cashCombo(false);
 
-    // Because a heavy rope can vault several rungs at once, the reward fires on every
-    // full x10 *crossed*, not on landing exactly on one.
-    const rewards = landed
-      ? Math.floor(link / COMBO.MAX) - Math.floor(this.chain / COMBO.MAX)
-      : 0;
-    if (rewards > 0) {
-      this.budget.grant(COMBO.REWARD_MOVES * rewards);
-      this.hud.showBankDelta(COMBO.REWARD_MOVES * rewards);
-      // Detonating changes the board, so its freed crossings have to be committed too —
-      // they belong to this move.
-      if (this.#detonateCursed()) events = events.concat(this.tracker.commit());
-    }
+    // The three conditions, all of them judged at the drop: it took something apart, it
+    // parked nothing on another rope, and it landed in time.
+    const qualifies = resolved > 0 && created === 0;
 
-    const result = this.score.award(events, created > 0, Math.min(link, COMBO.MAX));
-    this.tracker.collectPoints(this.crossingPoints);
+    if (qualifies) {
+      const before = this.cursedMult;
+      this.#advance(this.#knotPoints(events), curse, weight);
 
-    if (landed) {
-      this.chain = link;
-      this.chainTimer = comboWindow(link);
+      // A cursed combo carried to MAX blows the black rope off the board and banks a move.
+      // Its freed knots are knots this drop took, so they join the same run — at flat
+      // weight, since no rope was hauled to get them.
+      if (before < COMBO.MAX && this.cursedMult >= COMBO.MAX) {
+        this.budget.grant(COMBO.REWARD_MOVES);
+        this.hud.showBankDelta(COMBO.REWARD_MOVES);
+        if (this.#detonateCursed()) {
+          const freed = this.tracker.commit();
+          events = events.concat(freed);
+          this.#advance(this.#knotPoints(freed), -1, 1);
+        }
+      }
+
+      // Reset on every knot, and measured from the drop that earned it.
+      this.chainTimer = comboWindow(this.chain);
     } else {
-      // The chain ends here. A fumble forfeits the multiplier; a move that simply
-      // untangled nothing still banks the pot at the rung already reached.
-      this.#cashChain(created > 0, Math.max(this.chain, link));
+      // A fumble strips the cursed multiplier; a drop that untangled nothing banks in full.
+      this.#cashCombo(created > 0);
     }
 
-    if (result) {
-      for (const award of result.awards) {
-        const a = midpointOf(this.ropes[award.i]);
-        const b = midpointOf(this.ropes[award.j]);
-        this.flashes.push({
-          x: (a.x + b.x) / 2,
-          y: (a.y + b.y) / 2,
-          text: `+${Math.round(award.points)}`,
-          life: FLASH_MS,
-          total: FLASH_MS,
-        });
-      }
-      // Only while the chain is still climbing. Once it ends, #cashChain has already put
-      // up the payout callout, which is the one that matters.
-      if (landed && result.combo > 1 && !this.cashBanner) {
-        this.banner = {
-          text: result.name,
-          multiplier: `×${result.combo}`,
-          killed: false,
-          life: BANNER_MS,
-          total: BANNER_MS,
-        };
-      }
-    }
-    this.cashBanner = false;
+    // Precision points, banked immediately and silently — they are not part of the combo,
+    // and the player earned them whether or not a clock happened to be running. The number
+    // shown at the knot is the knot's combo value, which is the one that is at stake.
+    this.score.award(events);
+    this.tracker.collectPoints(this.knotMarkers);
 
     // Out of moves is not only "zero left" — with heavy ropes on the board, being unable
     // to afford even the cheapest remaining rope is just as dead.
@@ -556,7 +725,7 @@ export class Game {
 
     // A chain still running when the stage ends has to be paid out before the stage is
     // scored, or the pot would simply vanish.
-    this.#cashChain(false, this.chain);
+    this.#cashCombo(false);
 
     // Let a combo callout land before the panel covers the board. `ending` freezes
     // input for that beat, so the stage cannot be touched while it plays out.
@@ -591,6 +760,7 @@ export class Game {
     this.hud.showSolved({
       stage: this.stage,
       score,
+      perMove: this.score.perMove,
       untangles: this.score.untangles,
       ideal: this.budget.ideal,
       bonus: this.budget.bonus,
@@ -598,6 +768,7 @@ export class Game {
       carried,
       bank: this.budget.bank,
       bestCombo: this.score.bestCombo,
+      bestCursed: this.score.bestCursed,
       distancePx: this.score.distancePx,
       avgTightness: this.score.avgTightness,
       avgEfficiency: this.score.avgEfficiency,
@@ -608,7 +779,7 @@ export class Game {
 
   #gameOver() {
     this.state = 'gameover';
-    this.hud.showGameOver({ stage: this.stage, crossings: this.tracker.count });
+    this.hud.showGameOver({ stage: this.stage, knots: this.tracker.count });
   }
 
   // --- render ----------------------------------------------------------------
@@ -616,13 +787,20 @@ export class Game {
   render(now) {
     this.renderer.draw({
       ropes: this.ropes,
-      crossings: this.crossingPoints,
+      knots: this.knotMarkers,
       flashes: this.flashes,
       banner: this.banner,
       explosions: this.explosions,
       chain: this.chain,
-      chainPot: this.score.pendingPoints,
-      comboMax: COMBO.MAX,
+      cursedMult: this.cursedMult,
+      comboValue: this.score.comboValue(this.cursedMult),
+      comboShowFrom: COMBO.SHOW_FROM,
+      // Cursed runs only — see comboName. Empty the rest of the time, which is what keeps
+      // the normal indicator down to a knot count and a number.
+      comboName: this.#cursed() ? comboName(this.cursedMult) : '',
+      // 1 on the frame the multiplier climbed, easing to 0. The renderer owns the shape of
+      // the jump; the game only says when it was struck.
+      cursedPop: this.cursedPop / CURSED_POP_MS,
       grabbedId: this.grab ? this.ropes[this.grab.ropeIndex].id : -1,
       showMarkers: this.progress.options.markers,
       margin: this.margin,
@@ -637,8 +815,8 @@ export class Game {
     const nodeCounts = this.ropes.map((r) => r.nodes.length).join(',');
     const weights = this.ropes.map((r) => r.weight).join(',');
     return [
-      `stage ${this.stage}  ropes ${this.ropes.length}  crossings ${this.tracker ? this.tracker.count : 0}` +
-        (info ? ` (target ${info.spec.targetCrossings})` : ''),
+      `stage ${this.stage}  ropes ${this.ropes.length}  knots ${this.tracker ? this.tracker.count : 0}` +
+        (info ? ` (target ${info.spec.targetKnots})` : ''),
       info
         ? `cover ${info.moves.cover}  ideal ${info.moves.ideal}  bonus ${info.moves.bonus}  budget ${info.moves.budget}`
         : '',
@@ -648,7 +826,10 @@ export class Game {
       info
         ? `difficulty ${info.difficulty.toFixed(1)}  fits ${info.fits}  colour-converge ${(colorConvergence(this.stage, this.progress.options.distinct) * 100).toFixed(0)}%`
         : '',
-      `travel ${this.score.distancePx.toFixed(0)}px  points ${this.score.points.toFixed(1)}  score ${this.score.score.toFixed(1)}  bestCombo x${this.score.bestCombo}`,
+      `travel ${this.score.distancePx.toFixed(0)}px  points ${this.score.points.toFixed(1)}  per-move ${this.score.perMove.toFixed(1)}  bestCombo x${this.score.bestCombo}`,
+      `combo x${this.chain}${this.#cursed() ? `  CURSED x${this.cursedMult}` : ''}` +
+        `  knots ${this.score.comboKnots}  accrued ${this.score.comboScore.toFixed(0)}  shown ${this.score.comboValue(this.cursedMult).toFixed(0)}` +
+        `  window ${this.chainTimer.toFixed(0)}ms  burn x${this.#burnRate()}`,
       `state ${this.state}${this.grab ? '  grabbing' : ''}${this.settle ? '  settling' : ''}`,
     ].filter(Boolean);
   }

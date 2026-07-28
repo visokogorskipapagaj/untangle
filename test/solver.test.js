@@ -44,7 +44,7 @@ test('minimumVertexCover: a path of three needs one, a triangle needs two', () =
   );
 });
 
-test('minimumVertexCover: disjoint crossings each cost a move', () => {
+test('minimumVertexCover: disjoint knots each cost a move', () => {
   assert.equal(
     minimumVertexCover(4, [
       [0, 1],
@@ -100,7 +100,7 @@ test('moveBudgetFor: widens the cover by the slack factor', () => {
 test('moveBudgetFor: the crossing bonus follows its configured rate', () => {
   const budget = moveBudgetFor(4, [[0, 1], [2, 3]], 8);
   const expected =
-    MOVES.CROSSINGS_PER_BONUS > 0 ? Math.floor(8 / MOVES.CROSSINGS_PER_BONUS) : 0;
+    MOVES.KNOTS_PER_BONUS > 0 ? Math.floor(8 / MOVES.KNOTS_PER_BONUS) : 0;
 
   assert.equal(budget.bonus, expected);
   assert.equal(budget.budget, budget.ideal + expected);

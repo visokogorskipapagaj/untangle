@@ -82,7 +82,7 @@ test('a heavy rope always crosses something, and never dominates the stage', () 
         `stage ${stage}: ${heavy.length} heavy of ${info.ropes.length} exceeds the ${share} share cap`,
       );
 
-      // A heavy rope with no crossings would be decoration, not a decision.
+      // A heavy rope with no knots would be decoration, not a decision.
       const tracker = new TangleTracker(info.ropes);
       const degree = new Array(info.ropes.length).fill(0);
       for (const rec of tracker.pairs.values()) {

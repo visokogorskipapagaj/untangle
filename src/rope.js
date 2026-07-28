@@ -192,7 +192,7 @@ export class Rope {
 
   /**
    * Uniform scale plus offset, used on viewport resize. Scaling uniformly preserves
-   * every crossing exactly, so a resize mid-stage cannot create or destroy work.
+   * every knot exactly, so a resize mid-stage cannot create or destroy work.
    */
   transform(scale, offsetX, offsetY) {
     for (const p of this.nodes) {

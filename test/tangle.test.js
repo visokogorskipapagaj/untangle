@@ -23,7 +23,7 @@ test('counts a simple crossing and reports it as one graph edge', () => {
   const tracker = new TangleTracker(ropes);
 
   assert.equal(tracker.count, 1);
-  assert.deepEqual(tracker.crossingEdges(), [[0, 1]]);
+  assert.deepEqual(tracker.knotEdges(), [[0, 1]]);
 });
 
 test('recount refreshes geometry but never awards', () => {
@@ -120,7 +120,7 @@ test('a pair still crossing elsewhere reports a null gap', () => {
     Math.hypot(40, 80),
   );
   const tracker = new TangleTracker([straight, zig]);
-  assert.ok(tracker.count >= 2, `expected multiple crossings, got ${tracker.count}`);
+  assert.ok(tracker.count >= 2, `expected multiple knots, got ${tracker.count}`);
 
   zig.translate(0, -30); // lift it so fewer segments cross, but not all
   tracker.recount(1);

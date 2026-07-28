@@ -5,24 +5,49 @@ import { growRope } from './rope.js';
 import { moveBudgetFor } from './solver.js';
 import { TangleTracker } from './tangle.js';
 
-/** Rope count, crossing target and rope length for a stage. */
-export function stageSpec(stage) {
-  const ropeCount = Math.min(
+/** Rope count, knot target and rope length for a stage. */
+export function stageSpec(stage, phone = false) {
+  // Compounded and spread across the stages rather than stepped at the end of them, so the
+  // board grows a little every stage instead of standing still for five and then jumping.
+  const growth =
+    (1 + STAGE.GROWTH_STEP) **
+    (Math.max(0, stage - STAGE.GROWTH_FROM) / STAGE.GROWTH_EVERY);
+
+  const early = Math.min(
     STAGE.ROPES_MAX,
     Math.floor(STAGE.ROPES_BASE + stage * STAGE.ROPES_PER_STAGE),
   );
+  const full = Math.min(STAGE.ROPES_CEILING, Math.round(early * growth));
+  // Phones play a half-size board once there is enough on it to be crowded. The first few
+  // stages are already sparse, so there is nothing there to thin out — see PHONE_SCALE.
+  const ropeCount =
+    phone && full > STAGE.PHONE_FROM_ROPES
+      ? Math.max(STAGE.PHONE_FROM_ROPES, Math.round(full * STAGE.PHONE_SCALE))
+      : full;
 
-  const wanted = STAGE.CROSSINGS_BASE + Math.floor(stage * STAGE.CROSSINGS_PER_STAGE);
-  // Cap against what this many ropes can plausibly hold, or the generator spends its
-  // whole budget chasing a target it can never reach.
-  const targetCrossings = Math.min(wanted, Math.round(ropeCount * 2.5));
+  // The early knot curve is *held* at GROWTH_FROM and grown from there, rather than
+  // left to keep climbing linearly underneath the growth. Letting both run compounds two
+  // curves against each other, and the count outruns what the ropes can hold within a few
+  // stages — at which point the cap below is the only thing setting difficulty.
+  const held = Math.min(stage, STAGE.GROWTH_FROM);
+  const wanted = Math.round(
+    (STAGE.KNOTS_BASE + Math.floor(held * STAGE.KNOTS_PER_STAGE)) * growth,
+  );
+  // Capped twice: against what this many ropes can plausibly hold, or the generator spends
+  // its whole budget chasing a target it can never reach, and against the absolute ceiling
+  // past which a board stops being solvable however many moves it is granted.
+  const targetKnots = Math.min(
+    wanted,
+    Math.round(ropeCount * 2.5),
+    STAGE.KNOTS_CEILING,
+  );
 
   const lengthFactor = Math.max(
     STAGE.LENGTH_MIN,
     STAGE.LENGTH_BASE - stage * STAGE.LENGTH_DECAY,
   );
 
-  return { ropeCount, targetCrossings, lengthFactor };
+  return { ropeCount, targetKnots, lengthFactor };
 }
 
 export function playMargin(width, height) {
@@ -33,17 +58,17 @@ export function playMargin(width, height) {
  * Builds a stage.
  *
  * Ropes are grown as random walks with angular momentum (exact segment lengths, natural
- * curves), scattered, then hill-climbed toward the target crossing count by nudging one
+ * curves), scattered, then hill-climbed toward the target knot count by nudging one
  * rope at a time. Hill-climbing beats plain rejection sampling here: hitting "exactly 18
- * crossings" by chance is vanishingly unlikely, but walking toward it is easy.
+ * knots" by chance is vanishingly unlikely, but walking toward it is easy.
  *
  * Solvability is free in this game — ropes pass through each other and both ends are
  * loose, so any layout can be pulled apart as long as the ropes physically fit side by
  * side, which `fitsInViewport` checks.
  */
-export function generateStage(stage, width, height, seed) {
+export function generateStage(stage, width, height, seed, { phone = false } = {}) {
   const rng = makeRng(seed);
-  const spec = stageSpec(stage);
+  const spec = stageSpec(stage, phone);
   const diagonal = Math.hypot(width, height);
   const baseLength = diagonal * spec.lengthFactor;
   const margin = playMargin(width, height);
@@ -53,9 +78,15 @@ export function generateStage(stage, width, height, seed) {
   // therefore costs twice the travel to haul, which is the honest reading of "distance
   // moved" when the metric is the sum of every node's displacement.
   const segLen = baseLength / (ROPE.NODES - 1);
+  // The stage's cursed ropes are grown longer than the rest. Length is what puts a rope
+  // across other ropes, and a black rope that crosses nothing taxes nothing — see
+  // CURSED.LENGTH_SCALE. They are grown first and then seated on the most tangled ropes
+  // once the layout settles, which is usually the same ropes: length is what earns the
+  // crossings in the first place.
+  const cursed = cursedCount(stage, spec.ropeCount);
   const sizes = [];
   for (let i = 0; i < spec.ropeCount; i++) {
-    const size = rng.range(ROPE.SIZE_MIN, ROPE.SIZE_MAX);
+    const size = rng.range(ROPE.SIZE_MIN, ROPE.SIZE_MAX) * (i < cursed ? CURSED.LENGTH_SCALE : 1);
     sizes.push(
       clamp(Math.round((baseLength * size) / segLen) + 1, ROPE.NODES_MIN, ROPE.NODES_MAX),
     );
@@ -70,11 +101,11 @@ export function generateStage(stage, width, height, seed) {
     }
 
     const tracker = new TangleTracker(ropes);
-    hillClimb(ropes, tracker, spec.targetCrossings, rng, width, height, margin);
+    hillClimb(ropes, tracker, spec.targetKnots, rng, width, height, margin);
 
-    const error = Math.abs(tracker.count - spec.targetCrossings);
+    const error = Math.abs(tracker.count - spec.targetKnots);
     if (!best || error < best.error) {
-      best = { ropes, tracker, error, crossings: tracker.count };
+      best = { ropes, tracker, error, knots: tracker.count };
     }
     if (error === 0) break;
   }
@@ -83,7 +114,7 @@ export function generateStage(stage, width, height, seed) {
   const weights = moveCosts(best.ropes, best.tracker);
 
   const difficulty =
-    STAGE.TANGLE_W_CROSSINGS * best.crossings +
+    STAGE.TANGLE_W_KNOTS * best.knots +
     STAGE.TANGLE_W_ROPES * spec.ropeCount +
     STAGE.TANGLE_W_PROXIMITY * best.tracker.proximityPressure(baseLength * 0.25);
 
@@ -92,13 +123,13 @@ export function generateStage(stage, width, height, seed) {
   return {
     ropes: best.ropes,
     spec,
-    crossings: best.crossings,
+    knots: best.knots,
     // What the stage *should* cost: the cheapest set of ropes to relocate, widened by
     // slack. Weighted, so a heavy rope raises par honestly rather than underfunding it.
     moves: moveBudgetFor(
       spec.ropeCount,
-      best.tracker.crossingEdges(),
-      best.crossings,
+      best.tracker.knotEdges(),
+      best.knots,
       weights,
     ),
     weights,
@@ -107,6 +138,21 @@ export function generateStage(stage, width, height, seed) {
     margin,
     fits: fitsInViewport(totalLength, width, height, margin),
   };
+}
+
+/**
+ * How many cursed ropes a stage carries: one from CURSED.FROM, and past EXTRA_FROM one
+ * more every EXTRA_EVERY stages.
+ *
+ * Capped by share of the board rather than by a flat number, so the ceiling scales with
+ * however many ropes a stage happens to have. Without a cap the count climbs past what the
+ * board can hold and every rope on screen ends up taxed — the pool of tangled candidates
+ * runs dry first anyway, so the cap only makes an existing limit deliberate and legible.
+ */
+function cursedCount(stage, ropeCount) {
+  if (stage < CURSED.FROM) return 0;
+  const extra = Math.max(0, Math.ceil((stage - CURSED.EXTRA_FROM) / CURSED.EXTRA_EVERY));
+  return Math.min(1 + extra, Math.max(1, Math.floor(ropeCount * CURSED.MAX_SHARE)));
 }
 
 /**
@@ -131,7 +177,7 @@ function assignWeights(stage, ropes, tracker, rng) {
     doubles += 1 + Math.floor((stage - HEAVY.LATE_FROM) / HEAVY.LATE_EVERY);
   }
   const triples = stage >= HEAVY.TRIPLE_FROM && rng.next() < HEAVY.TRIPLE_CHANCE ? 1 : 0;
-  const cursed = stage >= CURSED.FROM ? 1 : 0;
+  const cursed = cursedCount(stage, ropes.length);
   if (doubles + triples + cursed === 0) return;
 
   const degree = new Array(ropes.length).fill(0);
@@ -146,16 +192,23 @@ function assignWeights(stage, ropes, tracker, rng) {
     .sort((a, b) => b.degree - a.degree);
   if (!candidates.length) return;
 
-  const pool = candidates.slice(0, Math.max(1, Math.ceil(candidates.length * 0.6)));
-  const share = stage > HEAVY.LATE_FROM ? HEAVY.LATE_MAX_SHARE : HEAVY.MAX_SHARE;
-
-  // The cursed rope claims its slot first — it is the stage's centrepiece, and it has to
-  // land on something tangled or its drag tax touches nothing.
-  if (cursed && pool.length) {
-    const pick = pool.splice(rng.int(0, pool.length - 1), 1)[0];
+  // The cursed ropes claim their slots first, and they take the *hubs* — the ropes with
+  // the most crossings on the board, which `candidates` is already sorted by.
+  //
+  // This used to be a random draw from the tangled 60%, which put the black rope on a
+  // middling rope with about three neighbours. Since the cursed multiplier can only climb
+  // by pulling ropes out of a curse's field, and each one is harvestable exactly once, that
+  // capped the whole mechanic at around x5 on the stages where it debuts — the x10
+  // detonation was unreachable rather than difficult. Seating it on the busiest rope is
+  // also simply what the black rope is *for*: an obstacle worth working around.
+  for (let c = 0; c < cursed && candidates.length; c++) {
+    const pick = candidates.shift();
     ropes[pick.i].cursed = true;
     ropes[pick.i].weight = CURSED.GRAB_COST;
   }
+
+  const pool = candidates.slice(0, Math.max(1, Math.ceil(candidates.length * 0.6)));
+  const share = stage > HEAVY.LATE_FROM ? HEAVY.LATE_MAX_SHARE : HEAVY.MAX_SHARE;
 
   const slots = Math.max(0, Math.floor(ropes.length * share) - cursed);
   // Triples before doubles: with limited slots the rarer rope is worth spending them on.
@@ -176,10 +229,11 @@ function assignWeights(stage, ropes, tracker, rng) {
  * player.
  */
 function moveCosts(ropes, tracker) {
-  const cursed = ropes.findIndex((rope) => rope.cursed);
+  const cursed = ropes.reduce((acc, rope, i) => (rope.cursed ? acc.concat(i) : acc), []);
   return ropes.map((rope, i) => {
     if (rope.cursed) return CURSED.GRAB_COST;
-    const taxed = cursed >= 0 && tracker.crossingsBetween(i, cursed) > 0;
+    // Flat across however many it is caught on, exactly as the board charges.
+    const taxed = cursed.some((c) => tracker.knotsBetween(i, c) > 0);
     return rope.weight * (taxed ? CURSED.DRAG_TAX : 1);
   });
 }
@@ -212,7 +266,7 @@ function spawnRope(id, segLen, nodeCount, rng, width, height, margin) {
 }
 
 /**
- * Nudges one rope at a time toward the target crossing count.
+ * Nudges one rope at a time toward the target knot count.
  * Equal-error moves are accepted so the search can cross plateaus instead of stalling.
  */
 function hillClimb(ropes, tracker, target, rng, width, height, margin) {
@@ -224,7 +278,7 @@ function hillClimb(ropes, tracker, target, rng, width, height, margin) {
     const rope = ropes[index];
     const saved = rope.saveState();
 
-    // Too few crossings: pull this rope into the crowd. Too many: push it out.
+    // Too few knots: pull this rope into the crowd. Too many: push it out.
     const centroid = layoutCentroid(ropes);
     const mid = rope.nodes[(rope.nodes.length / 2) | 0];
     const toward = tracker.count < target ? 1 : -1;
