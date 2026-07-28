@@ -1,0 +1,11 @@
+{
+  "name": "untangle",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Drop ropes, pull them apart. A canvas untangling game with no dependencies.",
+  "scripts": {
+    "start": "python3 -m http.server 8000",
+    "test": "node --test test/*.test.js"
+  }
+}

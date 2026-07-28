@@ -1,0 +1,371 @@
+:root {
+  --bg: #0a0d13;
+  --ink: #e8ecf4;
+  --muted: #7d879c;
+  --line: rgba(232, 236, 244, 0.12);
+  --panel: rgba(14, 18, 26, 0.92);
+  --accent: #5ee6a8;
+  --warn: #ff7a6b;
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+
+#stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+#canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: grab;
+}
+#canvas.is-grabbing { cursor: grabbing; }
+
+/* ---------- HUD ---------- */
+
+/* Three tracks so the middle group stays optically centred regardless of how wide the
+   stage counter or the score readout happen to get. */
+#hud {
+  position: absolute;
+  inset: 0 0 auto 0;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  padding-top: max(10px, env(safe-area-inset-top));
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgba(10, 13, 19, 0.85), transparent);
+}
+
+.hud__group {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.hud__group--center { justify-self: center; }
+.hud__group--right { justify-self: end; }
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 12px;
+  min-width: 0;
+  border-left: 1px solid transparent;
+}
+.stat + .stat { border-left-color: var(--line); }
+.hud__group--right .stat { text-align: right; }
+
+.stat__label {
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.stat__value {
+  font-family: var(--mono);
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.stat--crossings .stat__value { color: var(--warn); }
+.stat--crossings.is-clear .stat__value { color: var(--accent); }
+.stat--score .stat__value { color: var(--accent); }
+
+/* Running low on moves, then burning through banked ones, are the two states the player
+   most needs to notice without looking away from the ropes. */
+.stat--moves.is-low .stat__value { color: #ffd166; }
+.stat--moves.is-empty .stat__value { color: var(--warn); }
+.stat--moves.is-empty .stat__label { color: var(--warn); }
+
+.stat--bank .stat__value { color: #8ab4ff; }
+
+/* Move-cost and bank-gain popups. Anything that moves the counter by more than one
+   deserves to be *seen* moving it — the counter alone changes too quietly to notice
+   mid-drag. Slides in from above, out through the bottom. */
+.stat { position: relative; }
+
+.stat__delta {
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  margin-left: 6px;
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+}
+.stat__delta--cost { color: var(--warn); }
+.stat__delta--gain { color: var(--accent); }
+
+.stat__delta.is-firing { animation: delta-drop 350ms ease-out forwards; }
+
+/* Chain window. Collapses inward from both ends as the time to land the next move runs
+   out — a timed combo the player cannot see the clock on is just a mystery. Centred and
+   wide so it reads peripherally, without pulling the eye off the ropes. */
+.chain-meter {
+  position: absolute;
+  top: 64px;
+  left: 50%;
+  width: 75%;
+  height: 4px;
+  margin-left: -37.5%;
+  border-radius: 3px;
+  background: rgba(232, 236, 244, 0.09);
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+  z-index: 5;
+}
+.chain-meter.is-live { opacity: 1; }
+
+.chain-meter i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+  /* Scaled about the centre, so it shrinks from both sides rather than draining one way. */
+  transform-origin: center center;
+  will-change: transform;
+}
+
+/* Deep into a chain the window is tightest, so it runs hot rather than staying calm. */
+.chain-meter.is-hot i { background: #ffd166; }
+
+/* Final sliver: it goes red and buzzes, because at this point the player has a couple of
+   frames to react and a colour change alone is easy to miss mid-drag. */
+.chain-meter.is-critical i { background: var(--warn); }
+.chain-meter.is-critical { animation: chain-buzz 80ms linear infinite; }
+
+@keyframes chain-buzz {
+  0%, 100% { transform: translate(0, 0); }
+  25%      { transform: translate(-3px, 1px); }
+  50%      { transform: translate(3px, -1px); }
+  75%      { transform: translate(-2px, -1px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chain-meter.is-critical { animation: none; }
+}
+
+@keyframes delta-drop {
+  0%   { opacity: 0; transform: translateY(-150%); }
+  22%  { opacity: 1; transform: translateY(-50%); }
+  70%  { opacity: 1; transform: translateY(-50%); }
+  100% { opacity: 0; transform: translateY(60%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stat__delta.is-firing { animation: delta-fade 350ms ease-out forwards; }
+  @keyframes delta-fade {
+    0%, 70% { opacity: 1; transform: translateY(-50%); }
+    100% { opacity: 0; transform: translateY(-50%); }
+  }
+}
+
+/* Spending savings is the alarm state, so it gets a filled box rather than a colour
+   shift. The radius and padding sit on the base rule too, so lighting it up cannot
+   nudge the surrounding stats. */
+.stat--bank {
+  border-radius: 10px;
+  background: transparent;
+  transition: background 0.18s ease;
+}
+.stat--bank.is-burning {
+  background: var(--warn);
+  border-left-color: transparent;
+}
+.stat--bank.is-burning .stat__label,
+.stat--bank.is-burning .stat__value { color: #fff; }
+
+.icon-btn {
+  pointer-events: auto;
+  margin-left: 12px;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  cursor: pointer;
+}
+.icon-btn:hover { color: var(--ink); border-color: rgba(232, 236, 244, 0.3); }
+
+/* ---------- Overlays ---------- */
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(10, 13, 19, 0.72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 10;
+}
+.overlay.is-hidden { display: none; }
+
+.panel {
+  width: min(460px, 100%);
+  padding: 30px 32px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  text-align: center;
+}
+.panel--narrow { width: min(400px, 100%); text-align: left; }
+
+.title {
+  margin: 0 0 14px;
+  font-size: clamp(34px, 8vw, 52px);
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-indent: 0.22em;
+}
+.lede { margin: 0 0 26px; color: var(--muted); line-height: 1.65; font-size: 14px; }
+.hint { margin: 18px 0 0; color: var(--muted); font-size: 12px; min-height: 1em; }
+
+.eyebrow {
+  margin: 0 0 6px;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.bigscore {
+  margin: 0 0 22px;
+  font-family: var(--mono);
+  font-size: 52px;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+
+.breakdown {
+  margin: 0 0 20px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  text-align: left;
+}
+.breakdown > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  background: var(--panel);
+}
+.breakdown dt { font-size: 11px; color: var(--muted); }
+.breakdown dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.total { margin: 0 0 22px; font-size: 13px; color: var(--muted); }
+.total span { font-family: var(--mono); color: var(--ink); font-size: 16px; }
+
+.row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.panel--narrow .row { margin-top: 22px; }
+
+.btn {
+  appearance: none;
+  padding: 11px 22px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.btn:hover { background: rgba(232, 236, 244, 0.07); }
+.btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #05130d;
+  font-weight: 600;
+}
+.btn--primary:hover { background: #74f0b8; }
+
+.toggle {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  font-size: 14px;
+}
+.toggle input { margin-top: 3px; accent-color: var(--accent); flex: none; }
+.toggle em {
+  display: block;
+  margin-top: 3px;
+  font-style: normal;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* Grabbing the cursed rope costs ten moves. The whole view flinches. */
+#stage.is-shuddering { animation: shudder 420ms cubic-bezier(0.36, 0.07, 0.19, 0.97); }
+
+@keyframes shudder {
+  0%   { transform: translate(0, 0); }
+  12%  { transform: translate(-7px, 3px); }
+  24%  { transform: translate(6px, -4px); }
+  38%  { transform: translate(-5px, -2px); }
+  52%  { transform: translate(4px, 3px); }
+  66%  { transform: translate(-3px, 1px); }
+  80%  { transform: translate(2px, -1px); }
+  100% { transform: translate(0, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #stage.is-shuddering { animation: none; }
+}
+
+.bigscore--fail { color: var(--warn); font-size: 38px; }
+#overlay-gameover .lede { margin-bottom: 26px; }
+
+@media (max-width: 640px) {
+  /* Six stats will not fit; rope-moved is the one the player can lose and still play. */
+  .stat--distance { display: none; }
+}
+
+@media (max-width: 560px) {
+  .stat { padding: 4px 7px; }
+  .stat__value { font-size: 14px; }
+  .stat__label { font-size: 9px; }
+  .breakdown { grid-template-columns: 1fr; }
+}

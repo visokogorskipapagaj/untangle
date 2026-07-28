@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>Untangle</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="stage">
+    <canvas id="canvas"></canvas>
+
+    <header id="hud">
+      <div class="hud__group">
+        <div class="stat stat--stage">
+          <span class="stat__label">Stage</span>
+          <span class="stat__value" id="stat-stage">1</span>
+        </div>
+      </div>
+
+      <div class="hud__group hud__group--center">
+        <div class="stat stat--crossings">
+          <span class="stat__label">Crossings</span>
+          <span class="stat__value" id="stat-crossings">0</span>
+        </div>
+        <div class="stat stat--moves">
+          <span class="stat__label">Moves</span>
+          <span class="stat__value" id="stat-moves">0</span>
+          <span class="stat__delta stat__delta--cost" id="stat-moves-delta"></span>
+        </div>
+        <div class="stat stat--bank">
+          <span class="stat__label">Bank</span>
+          <span class="stat__value" id="stat-bank">0</span>
+          <span class="stat__delta stat__delta--gain" id="stat-bank-delta"></span>
+        </div>
+      </div>
+
+      <div class="hud__group hud__group--right">
+        <div class="stat stat--distance">
+          <span class="stat__label">Rope moved</span>
+          <span class="stat__value" id="stat-distance">0 cm</span>
+        </div>
+        <div class="stat stat--score">
+          <span class="stat__label">Score</span>
+          <span class="stat__value" id="stat-score">0</span>
+        </div>
+        <button id="btn-settings" class="icon-btn" type="button" aria-label="Settings">&#9881;</button>
+      </div>
+    </header>
+
+    <div class="chain-meter" id="chain-bar"><i id="chain-bar-fill"></i></div>
+
+    <!-- Title screen -->
+    <div id="overlay-title" class="overlay">
+      <div class="panel">
+        <h1 class="title">UNTANGLE</h1>
+        <p class="lede">Pick up the ropes. Pull them apart until nothing crosses.<br>
+          Every stage grants a limited number of moves. Spend fewer than you're given and
+          the rest bank for later &mdash; run out of both and the stage is lost.<br>
+          Rip several crossings apart in one pull for a combo.</p>
+        <button id="btn-start" class="btn btn--primary" type="button">Start</button>
+        <p class="hint" id="title-best"></p>
+      </div>
+    </div>
+
+    <!-- Stage complete -->
+    <div id="overlay-solved" class="overlay is-hidden">
+      <div class="panel">
+        <p class="eyebrow">Stage <span id="solved-stage">1</span> clear</p>
+        <p class="bigscore" id="solved-score">0</p>
+        <dl class="breakdown">
+          <div><dt>Untangles</dt><dd id="solved-untangles">0</dd></div>
+          <div><dt>Best combo</dt><dd id="solved-combo">&mdash;</dd></div>
+          <div><dt>Moves</dt><dd id="solved-moves">0 / 0</dd></div>
+          <div><dt>Carried over</dt><dd id="solved-carried">+0</dd></div>
+          <div><dt>Bank</dt><dd id="solved-bank">0</dd></div>
+          <div><dt>Rope moved</dt><dd id="solved-distance">0 cm</dd></div>
+          <div><dt>Avg tightness</dt><dd id="solved-tightness">&times;1.00</dd></div>
+          <div><dt>Avg efficiency</dt><dd id="solved-efficiency">100%</dd></div>
+          <div><dt>Best for stage</dt><dd id="solved-best">&mdash;</dd></div>
+        </dl>
+        <p class="total">Run total <span id="solved-total">0</span></p>
+        <div class="row">
+          <button id="btn-retry" class="btn" type="button">Retry stage</button>
+          <button id="btn-next" class="btn btn--primary" type="button">Next stage</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Out of moves -->
+    <div id="overlay-gameover" class="overlay is-hidden">
+      <div class="panel">
+        <p class="eyebrow">Out of moves</p>
+        <p class="bigscore bigscore--fail">Stage <span id="over-stage">1</span></p>
+        <p class="lede" id="over-detail"></p>
+        <div class="row">
+          <button id="btn-over-retry" class="btn btn--primary" type="button">Retry stage</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings -->
+    <div id="overlay-settings" class="overlay is-hidden">
+      <div class="panel panel--narrow">
+        <p class="eyebrow">Settings</p>
+        <label class="toggle">
+          <input type="checkbox" id="opt-distinct">
+          <span>Always-distinct colours<em>Stops rope colours converging on later stages.</em></span>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" id="opt-markers" checked>
+          <span>Show crossing markers<em>Pulsing dots on every remaining crossing.</em></span>
+        </label>
+        <div class="row">
+          <button id="btn-restart" class="btn" type="button">Restart from stage 1</button>
+          <button id="btn-close-settings" class="btn btn--primary" type="button">Done</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
