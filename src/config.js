@@ -494,12 +494,19 @@ export const CLOCK = {
    * none of this ever fires on it.
    *
    * They are deliberately not the same threshold. The wash is a warning with time left to
-   * act on it; the shake is the last moment before the buzzer, and it is not information
-   * so much as panic.
+   * act on it; the shake comes later and is not information so much as panic.
    */
 
-  /** Fraction of the deadline left at which the board starts going red. */
-  PANIC_FROM: 0.2,
+  /**
+   * Fraction of the deadline left at which the board starts going red.
+   *
+   * Nearly half the stage, which is a long warning — and it is meant to be. The ramp eases
+   * out from here (see the endgame ramps in game.js), so the colour arrives decisively at
+   * the threshold and then takes its time about the rest: the player is told they have
+   * crossed into the endgame at the moment they cross, and the long tail afterwards is the
+   * board getting quietly worse rather than the news being broken twice.
+   */
+  PANIC_FROM: 0.4,
   /**
    * How red it ever gets, at the very edge of the board and at zero on the clock. A quarter
    * is enough to change the colour of the room without touching the ropes' legibility —
@@ -515,8 +522,14 @@ export const CLOCK = {
    */
   PANIC_CORE: 0.32,
 
-  /** Fraction left at which the board itself starts shaking, and how far it goes, in px. */
-  SHAKE_FROM: 0.05,
+  /**
+   * Fraction left at which the board itself starts shaking, and how far it goes, in px.
+   *
+   * Still well inside the wash, so the two arrive as two pieces of news rather than one:
+   * the colour says the endgame has started, and the shake, later, says it is nearly over.
+   * Close the gap between these and the second one stops meaning anything on its own.
+   */
+  SHAKE_FROM: 0.15,
   SHAKE_PX: 5,
 
   /**

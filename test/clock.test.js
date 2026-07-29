@@ -250,6 +250,99 @@ test('a stage cannot be won by holding a rope until the answer arrives', () => {
   assert.equal(outcome(game.hud)[0], 'gameover', 'and it was cleared out of time');
 });
 
+test('the buzzer ends the stage with the rope still in hand, not at the drop', () => {
+  // The rope being held is not a reason to wait. Deferring to the release leaves the clock
+  // reading zero on a board that still answers to the pointer, and the player holding the
+  // one thing the readout says they have run out of.
+  const game = makeGame({ limit: 10000 });
+  const node = game.ropes[0].nodes[0];
+  assert.ok(game.onGrab(node.x, node.y, false));
+
+  advance(game, 9900);
+  assert.equal(game.state, 'playing', 'still theirs with a tenth of a second left');
+  assert.ok(game.grab, 'and still holding');
+
+  advance(game, 200);
+  assert.equal(game.state, 'gameover', 'the buzzer ended it where it stood');
+  assert.equal(game.grab, null, 'and took the rope out of their hand');
+  assert.equal(outcome(game.hud)[1].reason, 'time');
+});
+
+test('the gesture the buzzer interrupted is not charged for', () => {
+  // It was never completed: no drop, no settle, nothing scored. Spending the move as well
+  // would bill the player for the half of a gesture the game itself cut short.
+  const game = makeGame({ limit: 10000 });
+  const spent = game.budget.totalLeft;
+
+  const node = game.ropes[0].nodes[0];
+  assert.ok(game.onGrab(node.x, node.y, false));
+  game.ropes[0].translate(0, -170);
+  game.score.addDistance(600);
+  advance(game, 11000);
+
+  assert.equal(game.budget.totalLeft, spent, 'the move was not taken');
+  assert.equal(game.settle, null, 'and no settle was started to score it');
+});
+
+test('a lost stage does not sit on the verdict while a callout plays', () => {
+  // A callout outlives the drop that earned it by about a second, so one cashed just before
+  // the buzzer is still on screen when it goes. Holding the panel back for it means the
+  // board sits there red, shaking and reading 0.0 while the only thing the player is
+  // waiting to be told is whether the stage is over.
+  const game = makeGame({ limit: 10000 });
+  // Set with the buzzer already in sight, because a callout only lasts about a second — put
+  // one up at the start of the stage and it is long gone by the time the clock runs out.
+  advance(game, 9900);
+  game.banner = { multiplier: '3 KNOTS', payout: '+900', life: 900, total: 1100 };
+
+  advance(game, 200);
+
+  assert.ok(game.banner, 'sanity: the callout really was still on screen');
+  assert.equal(game.state, 'gameover', 'the verdict is not held back');
+  assert.equal(game.pending, null, 'and nothing is queued behind it');
+  assert.equal(outcome(game.hud)[0], 'gameover');
+});
+
+test('a cleared stage still holds the panel back so the callout can land', () => {
+  // The other half of the same rule. The winning move is very often the biggest combo of
+  // the stage, and slamming the card up over it is exactly when it is never seen.
+  const game = makeGame({ limit: 60000 });
+
+  drag(game, 0, 0, -170);
+  settleOut(game);
+  drag(game, 2, 0, -170); // the second knot, which both solves the board and pays the combo
+  settleOut(game);
+
+  assert.ok(game.banner, 'sanity: the clearing combo did call out');
+  assert.ok(game.pending, 'the panel is queued rather than shown');
+  assert.ok(game.pending.delay > 0, 'behind a real beat');
+
+  flush(game);
+  assert.equal(outcome(game.hud)[0], 'cleared');
+});
+
+test('a release after the buzzer finds nothing held and does nothing', () => {
+  // The pointer-up still arrives — the player has to let go eventually. By then the stage
+  // is over and the grab is gone, so it must not run a second ending through #endGesture.
+  const game = makeGame({ limit: 10000 });
+  const node = game.ropes[0].nodes[0];
+  game.onGrab(node.x, node.y, false);
+  game.ropes[0].translate(0, -170);
+  game.score.addDistance(600);
+  advance(game, 11000);
+
+  const endings = game.hud.calls.filter(([kind]) => kind === 'gameover').length;
+  game.onRelease();
+  settleOut(game);
+
+  assert.equal(game.settle, null, 'the late release started nothing');
+  assert.equal(
+    game.hud.calls.filter(([kind]) => kind === 'gameover').length,
+    endings,
+    'and the stage ended exactly once',
+  );
+});
+
 // --- the endgame, said by the board -------------------------------------------------
 
 /**
@@ -258,42 +351,45 @@ test('a stage cannot be won by holding a rope until the answer arrives', () => {
  * seconds: nearly out of forty seconds and nearly out of three minutes are the same feeling.
  */
 
-test('the board is calm for the first four fifths of the clock', () => {
+test('the board is calm for the first three fifths of the clock', () => {
   const game = makeGame({ limit: 100000 });
 
   assert.equal(drawn(game).panic, 0, 'nothing at the start');
 
-  advance(game, 79000);
-  assert.equal(drawn(game).panic, 0, 'and nothing at 21% left');
+  advance(game, 59000);
+  assert.equal(drawn(game).panic, 0, 'and nothing at 41% left');
 });
 
-test('the red comes on at a fifth left and fills as the clock empties', () => {
+test('the red comes on at two fifths left and fills as the clock empties', () => {
+  const game = makeGame({ limit: 100000 });
+
+  advance(game, 60000);
+  assertNear(drawn(game).panic, 0, 'it opens at exactly zero rather than snapping on');
+
+  // Three quarters rather than half: the ramp eases out, so the wash spends most of its
+  // range in the first moments past the threshold and takes the rest of the endgame to
+  // creep the last quarter. Crossing into the endgame is meant to be an event.
+  advance(game, 20000);
+  assertNear(drawn(game).panic, 0.75, 'half the endgame spent, three quarters of the wash');
+
+  advance(game, 19000);
+  assertNear(drawn(game).panic, 0.999, 'and all but there at a second to go');
+});
+
+test('the shake holds off well inside the wash, and then ramps on its own', () => {
   const game = makeGame({ limit: 100000 });
 
   advance(game, 80000);
-  assertNear(drawn(game).panic, 0, 'it opens at exactly zero rather than snapping on');
-
-  advance(game, 10000);
-  assertNear(drawn(game).panic, 0.5, 'half the endgame spent, half the wash');
-
-  advance(game, 9000);
-  assertNear(drawn(game).panic, 0.95, 'and it is nearly full at a second to go');
-});
-
-test('the shake holds off until the last twentieth, and then ramps on its own', () => {
-  const game = makeGame({ limit: 100000 });
-
-  advance(game, 90000);
   assert.ok(drawn(game).panic > 0, 'the wash is well under way');
   assert.equal(drawn(game).shake, 0, 'and the board is still still');
 
   advance(game, 5000);
   assertNear(drawn(game).shake, 0, 'it opens at zero too');
 
-  advance(game, 2500);
-  assertNear(drawn(game).shake, 0.5);
+  advance(game, 7500);
+  assertNear(drawn(game).shake, 0.75, 'and eases out the same way the wash does');
 
-  advance(game, 2400);
+  advance(game, 7400);
   assert.ok(drawn(game).shake > 0.9, 'wide open by the buzzer');
 });
 

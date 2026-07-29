@@ -217,15 +217,22 @@ typical one before it lands, so a single forged run cannot drag a stage's par do
 
 The clock stops behind an open dialog, and the deadline is judged **at the drop**: a rope
 released with a tenth of a second to spare has landed, and the unscored settle running on
-past zero cannot take that back. Hold a rope past the buzzer and it is judged late — a
-stage cannot be won by standing still until the answer arrives.
+past zero cannot take that back. That courtesy is the settle's alone. **The buzzer ends the
+stage on the frame it goes**, whatever the player was doing — a rope still in hand is taken
+out of it, where it stands, and the gesture is neither charged for nor scored. Waiting for
+the drop instead would leave the clock reading zero on a board that still answered to the
+pointer, which is the one moment the readout must not be able to lie.
 
-**The endgame is said by the board, not only by the readout.** Inside the last fifth of the
-deadline the background starts going red, and inside the last twentieth the board itself
-shakes, ±5px, ramping the whole way. Both are fractions of the deadline rather than counts
-of seconds, because nearly out of forty seconds and nearly out of three minutes are the
-same feeling and different numbers — and because an untimed stage pins its fraction at 1,
-so neither ever fires on a board nobody has cleared.
+**The endgame is said by the board, not only by the readout.** Inside the last *two* fifths
+of the deadline the background starts going red, and inside the last 15% the board itself
+shakes, ±5px, ramping the whole way. Two thresholds rather than one so they are two pieces
+of news: the colour says the endgame has started, the shake says it is nearly over. Both
+ramps ease out — most of the change is spent in the first moments past the threshold, so
+crossing one is an event rather than a gradient nobody notices, and the slow approach to
+full is the long tail. Both are fractions
+of the deadline rather than counts of seconds, because nearly out of forty seconds and
+nearly out of three minutes are the same feeling and different numbers — and because an
+untimed stage pins its fraction at 1, so neither ever fires on a board nobody has cleared.
 
 The wash is a second radial gradient laid straight over the one that was already there, and
 it runs the *other* way: weakest over the middle where the ropes are, strongest at the

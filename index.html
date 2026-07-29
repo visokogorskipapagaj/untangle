@@ -65,12 +65,11 @@
       <div class="panel">
         <h1 class="title">UNTANGLE</h1>
         <p class="lede">There's a pile of rope. It's in knots. Sort it out.<br>
-          You get so many moves and not one more. Come in under and the leftovers go in
-          your pocket; burn through those too and that's the stage, pal.<br>
+          You get so many moves and not one more &mdash; come in under and the leftovers go
+          in your pocket.<br>
           Rip a few knots apart in one go and the game gets excited about it.<br>
-          And there's a clock. Nobody made that number up &mdash; it's how long this stage
-          actually takes people, you included once you've done it. It gives back a little
-          less every stage, because of course it does.</p>
+          And there's a clock. It's how long this stage actually takes people, and it gives
+          back a little less every stage.</p>
         <div class="row">
           <button id="btn-start" class="btn btn--primary" type="button">Start</button>
           <button id="btn-riptear" class="btn btn--danger" type="button">Rip &amp; Tear</button>
@@ -147,49 +146,41 @@
 
         <div class="brief is-hidden" id="brief-clock">
           <p class="brief__title">THE CLOCK</p>
-          <p>Every stage has a clock on it, and it starts the moment this panel closes. No
-            lead-in, no three, two, one — the readout in the corner is live from the second
-            you can touch a rope, and it does not stop while you think about it.</p>
+          <p>Every stage is timed, and the clock starts the moment this closes. It does not
+            stop while you think about it.</p>
           <!-- Which of these two is up is the honest answer to "how long have I got", and
                the game genuinely does not know until the stage loads: a board nobody in the
                pool has ever cleared has no deadline to quote. Each carries its own last
                line, because the fail condition only exists on one of them. -->
           <p id="brief-clock-timed">This one gives you
-            <span class="num" id="brief-clock-limit">∞</span>. Nobody made that number up —
-            it's how long the stage actually takes people, and once you've cleared it a few
-            times it's how long it takes <strong>you</strong>. Run it down with knots still
-            on the board and that's the stage.</p>
+            <span class="num" id="brief-clock-limit">∞</span> — how long the stage actually
+            takes people, and how long it takes <strong>you</strong> once you've cleared it a
+            few times. Run it out with knots still on the board and that's the stage.</p>
           <p id="brief-clock-untimed">Except this one. Nobody has ever cleared it, so there's
-            nothing to measure you against and the corner reads <span class="num">∞</span>.
-            Take as long as you like — what you do with it now is the number you'll be racing
-            next time.</p>
+            nothing to race and the corner reads <span class="num">∞</span>. What you do with
+            it now is the number you'll be racing next time.</p>
         </div>
 
         <div class="brief is-hidden" id="brief-cursed">
           <p class="brief__title">CURSED ROPES</p>
-          <p>That black one with the pulse in it is not a rope you move. Grabbing it costs
-            ten, and anything still crossing it costs double to drag. Work the board
-            <strong>around</strong> it and it gets cheaper as you clear ropes off it.</p>
-          <p>It is also the biggest multiplier in the game. Pull a rope <strong>out of</strong>
-            its field while a combo is already running and the run goes cursed: everything the
-            combo has banked gets multiplied, and the multiplier climbs with every further
-            rope you haul off the black one.</p>
-          <p>So it is a two-part move, and that is the whole trick. Build an ordinary combo on
-            the clean ropes first — a cursed combo cannot be started cold, because with no run
-            going there is nothing to multiply — then turn it onto the black rope while the
-            window is still open. Take it to <span class="num">×10</span> and the rope
-            detonates for free.</p>
-          <p class="brief__warn">The window burns nearly twice as fast while it's cursed, and
-            parking a rope back on the black one is a fresh knot — which kills the run and the
-            multiplier with it.</p>
+          <p>The black one is not a rope you move. Grabbing it costs ten, and anything still
+            crossing it costs double to drag. Work the board <strong>around</strong> it.</p>
+          <p>It is also the biggest multiplier in the game. With a combo already running, pull
+            a rope <strong>out of</strong> its field: everything banked gets multiplied, and
+            the multiplier climbs with every further rope you haul off. Take it to
+            <span class="num">×10</span> and the rope detonates for free.</p>
+          <p>It cannot be started cold — build an ordinary combo on the clean ropes first,
+            then turn it onto the black rope.</p>
+          <p class="brief__warn">The window burns nearly twice as fast while cursed, and
+            parking a rope back on the black one kills the run.</p>
         </div>
 
         <div class="brief is-hidden" id="brief-riptear">
           <p class="brief__title">RIP &amp; TEAR</p>
           <p class="brief__warn">Oh, stage 30 straight off the bat. Big man. Let's see it
             then.</p>
-          <p>Par, where the margin the clock gives you reaches exactly zero. Heavy ropes,
-            several cursed ones, and the run's usual three banked moves. Nothing else.</p>
+          <p>Par, where the clock's margin reaches zero. Heavy ropes, several cursed ones,
+            three banked moves. Nothing else.</p>
         </div>
 
         <div class="row brief__actions">

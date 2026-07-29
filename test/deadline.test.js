@@ -290,6 +290,17 @@ test('the readout counts in seconds, then in tenths, and names the untimed stage
   assert.equal(formatClock(-50), '0.0', 'and never shows a negative');
 });
 
+test('"0.0" means zero, not nearly zero', () => {
+  // Rounding to nearest would put 0.0 on screen with up to 50ms still on the clock, and
+  // 50ms is three frames the player can still grab a rope in. Every displayed value has to
+  // be time they really have, so the tenths ceil exactly as the seconds above them do.
+  assert.equal(formatClock(1), '0.1', 'a millisecond left is not none');
+  assert.equal(formatClock(49), '0.1', 'and neither is the last half of a tenth');
+  assert.equal(formatClock(100), '0.1');
+  assert.equal(formatClock(101), '0.2', 'a tenth and a bit is still two tenths to run');
+  assert.equal(formatClock(0), '0.0', 'only zero reads zero');
+});
+
 test('a finished duration is reported without the countdown tenths', () => {
   assert.equal(formatClock(4900, { tenths: false }), '0:05');
   assert.equal(formatClock(95000, { tenths: false }), '1:35');

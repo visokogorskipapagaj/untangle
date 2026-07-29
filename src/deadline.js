@@ -284,11 +284,16 @@ export class StageClock {
  * `tenths` is what makes this a countdown, so a readout reporting a finished duration
  * turns it off: the urgency is the only reason for the decimal, and there is none left
  * once the stage is over.
+ *
+ * Both scales round *up*, and that is the whole of what makes "0.0" trustworthy. Rounding
+ * to nearest would put 0.0 on screen with up to 50ms still on the clock — a stage the
+ * player can still act on, reading as one that is already over. Ceiling means every
+ * displayed value is time the player really has, and 0.0 appears at zero and nowhere else.
  */
 export function formatClock(ms, { tenths = true } = {}) {
   if (!Number.isFinite(ms)) return '∞';
-  const seconds = Math.max(0, ms) / 1000;
-  if (tenths && ms < CLOCK.CRITICAL_MS) return seconds.toFixed(1);
-  const whole = Math.ceil(seconds);
+  const left = Math.max(0, ms);
+  if (tenths && ms < CLOCK.CRITICAL_MS) return (Math.ceil(left / 100) / 10).toFixed(1);
+  const whole = Math.ceil(left / 1000);
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
 }

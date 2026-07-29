@@ -36,6 +36,17 @@ const KILLED_BANNER_MS = 1500;
 /** Largest slice of a drag applied before length constraints run again. */
 const SUBSTEP_LIMIT = 8;
 
+/**
+ * Quadratic ease-out, for the endgame ramps — 0 and 1 still land exactly on 0 and 1, and
+ * the midpoint sits at 0.75 rather than 0.5.
+ *
+ * Quadratic rather than cubic on purpose. Cubic puts the midpoint at 0.875, which on the
+ * wash means the board is within a whisker of its reddest for the whole back half of the
+ * endgame — an alarm that arrives at full and then has nothing left to say. Quadratic is
+ * decisive at the threshold and still has somewhere to go afterwards.
+ */
+const easeOut = (t) => 1 - (1 - t) * (1 - t);
+
 export class Game {
   constructor({ renderer, hud, progress, pool = null, baseSeed, debug, phone = false }) {
     this.renderer = renderer;
@@ -432,9 +443,13 @@ export class Game {
       // The stage clock, judged at the same instant and for the same reason. A rope
       // released with a moment to spare has landed, and the settle running on past the
       // buzzer is the game's time, not the player's — so a drop that clears the board at
-      // 0.1s left is a win even though it finishes resolving after zero. Held past the
-      // buzzer instead and this latches true: standing still with a rope in hand is not a
-      // way to stop the clock.
+      // 0.1s left is a win even though it finishes resolving after zero.
+      //
+      // In practice this only ever latches false now, and that is the point rather than an
+      // oversight: the buzzer ends the stage on the frame it goes, so there is no such
+      // thing as a release made after it — #timeUp has already taken the rope out of the
+      // player's hand. What is left here is the guarantee for the settle alone, stated
+      // where the verdict is taken rather than assumed further down.
       expired: this.clock.expired,
     };
   }
@@ -684,11 +699,13 @@ export class Game {
     const ticking = this.state === 'playing' && !this.hud.anyOverlayOpen;
     if (ticking) {
       this.clock.tick(dt);
-      // Same guard the combo uses, for the same reason: a rope already dropped is a
-      // landing #endGesture has not scored yet and carries its own latched verdict, and a
-      // rope still in hand is judged when it is let go. Ending the stage from underneath
-      // either would take away a move the player had already made.
-      if (this.clock.expired && !this.grab && !this.settle) this.#timeUp();
+      // A rope already dropped is a landing #endGesture has not scored yet: it latched its
+      // own verdict at the drop, and ending the stage from underneath it would take away a
+      // move the player had already made. A rope still *in hand* is not that. It is a move
+      // not yet made, the buzzer has gone, and the stage is over at the buzzer — waiting
+      // for the drop would leave the clock reading zero while the board still answered to
+      // the pointer, which is the one moment the readout must not be able to lie.
+      if (this.clock.expired && !this.settle) this.#timeUp();
     }
 
     // The window runs in real time from the *priming* drop — while the player is thinking,
@@ -887,9 +904,9 @@ export class Game {
     // Out of moves is not only "zero left" — with heavy ropes on the board, being unable
     // to afford even the cheapest remaining rope is just as dead.
     const stuck = this.budget.totalLeft < this.#cheapestMove();
-    // The clock outranks the board. This is the rope that was still in hand when the
-    // buzzer went, so whatever it just achieved, it achieved out of time — a stage cannot
-    // be won by holding a rope until the answer arrives.
+    // The clock outranks the board: whatever this drop just achieved, it achieved out of
+    // time. Only a settle can get here with it set — a held rope never does, because the
+    // buzzer ends the stage where it stands rather than waiting for the drop.
     const finish = expired
       ? 'gameover'
       : this.tracker.count === 0
@@ -902,8 +919,22 @@ export class Game {
     this.#endStage(finish, expired ? 'time' : 'moves');
   }
 
-  /** The clock ran out with nothing in flight. */
+  /**
+   * The clock ran out. The stage is over on that frame, whatever the player was doing.
+   *
+   * A rope in hand is abandoned where it stands rather than dropped: dropping it would run
+   * it through #endGesture, which spends the move, starts a settle and scores whatever the
+   * settle resolves — an untangle credited after the buzzer, paid for out of a budget the
+   * stage no longer has. The gesture was never completed, so it is not charged and not
+   * scored, and the rope simply stops where the clock caught it.
+   *
+   * Clearing `grab` is also what stops the board answering to the pointer: #updateDrag runs
+   * off `grab` alone, so a held rope would otherwise stay draggable underneath the
+   * game-over panel. The release that eventually arrives finds nothing held and does
+   * nothing, which is the whole of the cleanup.
+   */
   #timeUp() {
+    this.grab = null;
     this.#endStage('gameover', 'time');
   }
 
@@ -912,13 +943,19 @@ export class Game {
    *
    * A chain still running has to be paid out before the stage is scored, or the pot would
    * simply vanish — and that is as true of a stage lost to the clock as of one solved.
-   * Then `ending` freezes input for a beat so a combo callout can land before the panel
-   * covers the board.
+   *
+   * The beat afterwards is not. `ending` holds the panel back so a combo callout can land
+   * before it covers the board, and that is worth having on a stage the player won: the
+   * winning move is very often the biggest combo of the stage. On a stage they lost it is
+   * the game sitting on the verdict — a second of callout over a board that is already red,
+   * already shaking and reading 0.0, while the one thing the player is waiting to be told
+   * is whether it is over. It is over. Say so.
    */
   #endStage(finish, reason) {
     this.#cashCombo(false);
     this.state = 'ending';
-    this.pending = { finish, reason, delay: this.banner ? BANNER_HOLD_MS : 0 };
+    const holds = finish === 'solve' && this.banner;
+    this.pending = { finish, reason, delay: holds ? BANNER_HOLD_MS : 0 };
     if (this.pending.delay <= 0) this.#finishStage();
   }
 
@@ -988,8 +1025,8 @@ export class Game {
    *
    * Two ramps rather than one, because they say different things. `wash` opens at
    * PANIC_FROM and is a warning — there is still time to do something about it. `shake`
-   * opens at SHAKE_FROM and is not information at all; it is the last few seconds felt
-   * rather than read.
+   * opens later, at SHAKE_FROM, and is not information at all; it is the end of the stage
+   * felt rather than read.
    *
    * Both are gated on the stage actually being under way. The clock's fraction survives the
    * end of a stage — a board lost to it sits at exactly zero — and a game-over panel over a
@@ -998,13 +1035,20 @@ export class Game {
    * out from under the callout would be a pop.
    *
    * An untimed stage pins the fraction at 1, so neither ever fires on one.
+   *
+   * Both ease out: most of the change is spent in the first moments past the threshold, and
+   * the approach to full is slow. That is the shape that makes crossing a threshold an
+   * event. A linear ramp announces nothing at the moment it opens — it is indistinguishable
+   * from the frame before it for a good second either side, which on a threshold set at
+   * PANIC_FROM is most of a stage spent not-quite-warning. Easing out spends the intensity
+   * where the news is, and lets the tail be the long part.
    */
   #panic() {
     if (this.state !== 'playing' && this.state !== 'ending') return { wash: 0, shake: 0 };
     const left = this.clock.fraction;
     return {
-      wash: clamp((CLOCK.PANIC_FROM - left) / CLOCK.PANIC_FROM, 0, 1),
-      shake: clamp((CLOCK.SHAKE_FROM - left) / CLOCK.SHAKE_FROM, 0, 1),
+      wash: easeOut(clamp((CLOCK.PANIC_FROM - left) / CLOCK.PANIC_FROM, 0, 1)),
+      shake: easeOut(clamp((CLOCK.SHAKE_FROM - left) / CLOCK.SHAKE_FROM, 0, 1)),
     };
   }
 
