@@ -48,6 +48,27 @@ const SUBSTEP_LIMIT = 8;
 const easeOut = (t) => 1 - (1 - t) * (1 - t);
 
 export class Game {
+  /**
+   * The game's only entry point, and the one signature the UI layer has to agree with.
+   *
+   * Spelled out because `pool` defaults to null: without this a type checker reads that
+   * default as the whole of what the parameter accepts, and main.ts — which passes a real
+   * Pool whenever `?pool=0` is absent — becomes an error against a game that has always
+   * taken one.
+   *
+   * `hud` is deliberately loose. Three test files drive this class through a stub that
+   * records calls rather than through the real one, and that is the point of the seam.
+   *
+   * @param {{
+   *   renderer: import('./render.js').Renderer,
+   *   hud: any,
+   *   progress: any,
+   *   pool?: import('./pool.js').Pool | null,
+   *   baseSeed: number,
+   *   debug?: boolean,
+   *   phone?: boolean,
+   * }} options
+   */
   constructor({ renderer, hud, progress, pool = null, baseSeed, debug, phone = false }) {
     this.renderer = renderer;
     this.hud = hud;

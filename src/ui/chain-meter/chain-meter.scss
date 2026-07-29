@@ -1,0 +1,121 @@
+/**
+ * The chain window. Collapses inward from both ends as the time to land the next move runs
+ * out — a timed combo the player cannot see the clock on is just a mystery. Centred and
+ * wide so it reads peripherally, without pulling the eye off the ropes.
+ */
+:host {
+  position: absolute;
+  top: 64px;
+  left: 50%;
+  width: 75%;
+  height: 4px;
+  margin-left: -37.5%;
+  border-radius: 3px;
+  background: rgba(232, 236, 244, 0.09);
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+  z-index: 5;
+}
+
+:host([live]) {
+  opacity: 1;
+}
+
+i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+  /* Scaled about the centre, so it shrinks from both sides rather than draining one way. */
+  transform-origin: center center;
+  will-change: transform;
+}
+
+/* Priming: the starter is half done and the clock is running, but nothing is at stake yet.
+   Thin and muted, so the bar reads as a countdown rather than a pot. */
+:host([priming]) {
+  height: 2px;
+  opacity: 0.55;
+}
+
+:host([priming]) i {
+  background: rgba(159, 180, 216, 0.75);
+}
+
+/* Deep into a chain the window is tightest, so it runs hot rather than staying calm. */
+:host([hot]) i {
+  background: var(--amber);
+}
+
+/* Final sliver: it goes red and buzzes, because at this point the player has a couple of
+   frames to react and a colour change alone is easy to miss mid-drag. */
+:host([critical]) i {
+  background: var(--warn);
+}
+
+:host([critical]) {
+  animation: chain-buzz 80ms linear infinite;
+}
+
+/* CURSED COMBO: the window burns down twice as fast, so the meter must stop reading as the
+   same meter. It doubles in height and blinks — a hard step, not a fade, because a smooth
+   pulse is exactly what the eye stops noticing. Declared after [critical] so it wins the
+   equal-specificity tie; the two states compose in the combined rule below. */
+:host([cursed]) {
+  height: 8px;
+  animation: chain-blink 280ms steps(1, end) infinite;
+}
+
+:host([cursed]) i {
+  background: var(--warn);
+  box-shadow: 0 0 12px rgba(255, 122, 107, 0.9);
+}
+
+/* Both at once: blink on opacity, buzz on transform, so neither animation clobbers the
+   other's property. */
+:host([cursed][critical]) {
+  animation:
+    chain-blink 150ms steps(1, end) infinite,
+    chain-buzz 80ms linear infinite;
+}
+
+@keyframes chain-buzz {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  25% {
+    transform: translate(-3px, 1px);
+  }
+  50% {
+    transform: translate(3px, -1px);
+  }
+  75% {
+    transform: translate(-2px, -1px);
+  }
+}
+
+@keyframes chain-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0.28;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :host([critical]),
+  :host([cursed]),
+  :host([cursed][critical]) {
+    animation: none;
+  }
+
+  /* The height change carries the state on its own when motion is off. */
+  :host([cursed]) {
+    opacity: 1;
+  }
+}

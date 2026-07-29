@@ -3,9 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Drop ropes, pull them apart. A canvas untangling game with no dependencies.",
+  "description": "Drop ropes, pull them apart. A canvas untangling game built from web components.",
   "scripts": {
-    "start": "node server/index.js",
-    "test": "node --test test/*.test.js"
+    "dev": "vite",
+    "build": "vite build",
+    "start": "npm run build && node server/index.js",
+    "serve": "node server/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --import ./test/support/register.js --test test/*.test.js"
+  },
+  "devDependencies": {
+    "happy-dom": "^20.11.1",
+    "sass": "^1.102.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.5"
   }
 }

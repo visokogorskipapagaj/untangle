@@ -1,0 +1,236 @@
+/* The host is the stat box itself rather than a wrapper round one, which is what lets the
+   HUD put the dividers between them with an adjacent-sibling rule. */
+:host {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 12px;
+  min-width: 0;
+  /* Transparent by default so lighting a divider up cannot nudge the stats along. */
+  border-left: 1px solid transparent;
+}
+
+.label {
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.value {
+  font-family: var(--mono);
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+/* ---------- what each readout is worth saying ---------- */
+
+:host([variant='knots']) .value {
+  color: var(--warn);
+}
+
+:host([variant='knots'][state='clear']) .value {
+  color: var(--accent);
+}
+
+:host([variant='score']) .value {
+  color: var(--accent);
+}
+
+/* Running low on moves, then burning through banked ones, are the two states the player
+   most needs to notice without looking away from the ropes. */
+:host([variant='moves'][state='low']) .value {
+  color: var(--amber);
+}
+
+:host([variant='moves'][state='empty']) .value,
+:host([variant='moves'][state='empty']) .label {
+  color: var(--warn);
+}
+
+:host([variant='bank']) .value {
+  color: var(--bank);
+}
+
+/* The stage clock. Untimed is the resting state — a stage nobody has cleared yet — and it
+   is deliberately quiet: dimmed to the label colour so an infinity sign sitting in the HUD
+   reads as "no deadline here" rather than as a stat waiting to be filled in. */
+:host([variant='time'][state='untimed']) .value {
+  color: var(--muted);
+}
+
+:host([variant='time'][state='low']) .value {
+  color: var(--amber);
+}
+
+/* The last few seconds, where the readout has switched to tenths. The pulse is on the whole
+   stat rather than the digits so it stays visible in peripheral vision, which is where the
+   player's attention actually is by this point. */
+:host([variant='time'][state='critical']) .value,
+:host([variant='time'][state='critical']) .label {
+  color: var(--warn);
+}
+
+:host([variant='time'][state='critical']) {
+  animation: time-pulse 500ms ease-in-out infinite;
+}
+
+@keyframes time-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Colour alone carries it; the readout is already counting in tenths by here. */
+  :host([variant='time'][state='critical']) {
+    animation: none;
+  }
+}
+
+/* ---------- the bank, which is a box rather than a colour ---------- */
+
+/**
+ * Spending savings is the alarm state, so it gets a filled box rather than a colour shift.
+ * The radius and padding sit on the base rule too, so lighting it up cannot nudge the
+ * surrounding stats.
+ *
+ * The divider is a pseudo-element rather than the HUD's shared sibling border, because this
+ * is the one stat with a border radius: a 1px left border on a rounded box follows the
+ * corners round and draws a bent stroke instead of a divider. A positioned line has no
+ * corners to follow, and it can be taken away on its own when the box lights up — a divider
+ * on the edge of a filled panel reads as a seam in the panel.
+ */
+:host([variant='bank']) {
+  border-radius: 10px;
+  background: transparent;
+  transition: background 0.18s ease;
+}
+
+:host([variant='bank'])::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1px;
+  height: 62%;
+  background: var(--line);
+  transition: opacity 0.18s ease;
+}
+
+:host([variant='bank'][state='burning']) {
+  background: var(--warn);
+}
+
+:host([variant='bank'][state='burning'])::before {
+  opacity: 0;
+}
+
+:host([variant='bank'][state='burning']) .label,
+:host([variant='bank'][state='burning']) .value {
+  color: #fff;
+}
+
+/* Full, so spare moves are being thrown away rather than carried. A dimmed label and an
+   outline, not a colour alarm: this is a nudge to spend, and the alarm state above uses
+   colour for the thing that actually costs a run. */
+:host([variant='bank'][state='full']) {
+  box-shadow: inset 0 0 0 1px rgba(138, 180, 255, 0.45);
+}
+
+:host([variant='bank'][state='full']) .label {
+  color: var(--bank);
+}
+
+/* ---------- the popups ---------- */
+
+/* Move-cost and bank-gain popups. Anything that moves the counter by more than one deserves
+   to be *seen* moving it — the counter alone changes too quietly to notice mid-drag. Slides
+   in from above, out through the bottom. */
+.delta {
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  margin-left: 6px;
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+}
+
+:host([delta='cost']) .delta {
+  color: var(--warn);
+}
+
+:host([delta='gain']) .delta {
+  color: var(--accent);
+}
+
+.delta.is-firing {
+  animation: delta-drop 350ms ease-out forwards;
+}
+
+@keyframes delta-drop {
+  0% {
+    opacity: 0;
+    transform: translateY(-150%);
+  }
+  22% {
+    opacity: 1;
+    transform: translateY(-50%);
+  }
+  70% {
+    opacity: 1;
+    transform: translateY(-50%);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(60%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .delta.is-firing {
+    animation: delta-fade 350ms ease-out forwards;
+  }
+
+  @keyframes delta-fade {
+    0%,
+    70% {
+      opacity: 1;
+      transform: translateY(-50%);
+    }
+    100% {
+      opacity: 0;
+      transform: translateY(-50%);
+    }
+  }
+}
+
+/* ---------- narrow screens ---------- */
+
+@media (max-width: 560px) {
+  :host {
+    padding: 4px 7px;
+  }
+
+  .value {
+    font-size: 14px;
+  }
+
+  .label {
+    font-size: 9px;
+  }
+}

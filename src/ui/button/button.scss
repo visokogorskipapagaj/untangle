@@ -1,0 +1,99 @@
+:host {
+  display: inline-flex;
+}
+
+:host([hidden]) {
+  display: none;
+}
+
+/* Always a flex row with a gap, whether or not there is an icon in it. A button that leads
+   with an icon and keeps its label is the common case here — "Retry stage" and "Back to
+   stage 1" carry the same reload icon and mean quite different things, one replaying the
+   board and the other throwing the run away, so the icon decorates the label rather than
+   replacing it. With no icon the gap simply has nothing to sit between. */
+.btn {
+  appearance: none;
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 22px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+
+  &:hover {
+    background: rgba(232, 236, 244, 0.07);
+  }
+}
+
+/* The way on. Green, filled, and the only treatment that reads as the thing to press. */
+:host([variant='primary']) .btn {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #05130d;
+  font-weight: 600;
+
+  &:hover {
+    background: #74f0b8;
+  }
+}
+
+/* Rip & Tear. It skips thirty stages of ramp, so it should not look like the safe one. */
+:host([variant='danger']) .btn {
+  border-color: var(--warn);
+  color: var(--warn);
+  font-weight: 600;
+
+  &:hover {
+    background: rgba(255, 122, 107, 0.14);
+  }
+}
+
+::slotted(u-icon) {
+  width: 16px;
+  height: 16px;
+}
+
+/**
+ * Held: the button is not merely available, it is *doing* something, and the rest of the
+ * screen expresses that by not moving — which is exactly what a long phase looks like
+ * anyway. So the control that did it breathes.
+ *
+ * Animated on the stroke and on a ring outside it. `box-shadow` takes no layout space, so
+ * nothing shifts and whatever sits beside this button does not move under the cursor.
+ */
+:host([held]) .btn {
+  border-color: var(--amber);
+  color: var(--amber);
+  animation: held-breathe 1.8s ease-in-out infinite;
+}
+
+/* The amber is --amber at varying alpha; it is spelled out because a keyframe cannot fade a
+   token without color-mix, and the two values have to stay in step by hand. */
+@keyframes held-breathe {
+  0%,
+  100% {
+    border-color: rgba(255, 209, 102, 0.95);
+    box-shadow: 0 0 0 3px rgba(255, 209, 102, 0.18);
+  }
+  50% {
+    border-color: rgba(255, 209, 102, 0.34);
+    box-shadow: 0 0 0 3px rgba(255, 209, 102, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The solid stroke and the amber label carry it on their own. */
+  :host([held]) .btn {
+    animation: none;
+  }
+}

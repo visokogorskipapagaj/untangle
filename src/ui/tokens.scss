@@ -1,0 +1,26 @@
+/**
+ * The design system, and the one stylesheet that is deliberately global.
+ *
+ * Custom properties inherit through shadow boundaries, which is what lets every component
+ * be sealed off from every other one and still be the same game. A component reaching for
+ * `var(--accent)` gets it without anyone handing it over; a component reaching for another
+ * component's `.btn` gets nothing, which is the arrangement this file exists to allow.
+ */
+:root {
+  --bg: #0a0d13;
+  --ink: #e8ecf4;
+  --muted: #7d879c;
+  --line: rgba(232, 236, 244, 0.12);
+  --panel: rgba(14, 18, 26, 0.92);
+  --accent: #5ee6a8;
+  --warn: #ff7a6b;
+  /* The one warning that is not yet a problem: low on moves, low on time, held. */
+  --amber: #ffd166;
+  /* A plain wash over whatever is behind it. The interlude's countdown is drawn in it. */
+  --white-10: rgba(255, 255, 255, 0.1);
+  /* The bank, which is neither a warning nor a win — the only stat with a colour of its
+     own, so it is a token rather than a hex code repeated across two components. */
+  --bank: #8ab4ff;
+  --font: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+}

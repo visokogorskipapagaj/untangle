@@ -1,0 +1,16 @@
+@use '../shared/typography';
+@use '../shared/row';
+
+:host {
+  display: contents;
+}
+
+:host([hidden]) {
+  display: none;
+}
+
+/* The toggles run to the panel's edges and this row does not, so it needs the gap the
+   toggle's own bottom rule does not provide. */
+.row {
+  margin-top: 22px;
+}

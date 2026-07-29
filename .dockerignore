@@ -7,6 +7,10 @@ Dockerfile
 .dockerignore
 compose.yaml
 
+# The build runs in its own stage. A dist/ from the host would be copied in and then
+# overwritten anyway, and if the stage were ever reordered it would be silently shipped.
+dist
+
 # Never bake a pool into an image. It would ship one machine's playerbase to every
 # deployment and become everybody's starting par — the same reason it is gitignored.
 server/data

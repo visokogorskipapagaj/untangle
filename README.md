@@ -10,20 +10,61 @@ There is also a clock, and nobody picked its numbers: a stage's deadline is what
 it actually takes, pooled across everyone who plays, with progressively less of it handed
 back as the stages get harder.
 
-Vanilla JS, Canvas 2D, native ES modules. No dependencies, no build step.
+Canvas 2D for the board, native web components for everything around it. The simulation is
+plain JavaScript; the interface is a folder per element, built with Vite.
 
 ## Run
 
 ```bash
-npm start
+npm start          # builds, then serves on :8000
 ```
 
-Then open <http://localhost:8000>. That serves the game *and* the pool API from one
+Then open <http://localhost:8000>. That serves the built game *and* the pool API from one
 dependency-free Node server; times are kept in `server/data/pool.json`.
 
-The game still works as plain static files with no server at all — it falls back to the
-clear times on the device, which is also what happens whenever the API is unreachable.
-`?pool=0` forces that path.
+```bash
+npm run dev        # Vite dev server on :5173, with HMR
+npm run serve      # serve an existing build, no rebuild
+npm run build      # -> dist/
+npm run typecheck
+```
+
+`npm run dev` proxies `/api` through to :8000, so run `npm run serve` alongside it if you
+want the pool live while editing. Without it the game falls back to this device's own clear
+times, which is also what happens whenever the API is unreachable — `?pool=0` forces that
+path deliberately.
+
+## Layout
+
+```
+index.html          a canvas and seven tags
+src/
+  main.ts           boot: renderer, input, the frame loop
+  hud.ts            the one object the game talks to about the screen
+  app.scss          the page, the playfield, the canvas
+  *.js              the simulation — ropes, knots, solver, scoring, clock, pool
+  ui/
+    tokens.scss     the design system, and the only global styling
+    base.ts         shadow root, adopted sheet, template
+    <component>/    <component>.html + .scss + .ts
+server/             the pool API, and the static server for dist/
+```
+
+Every element on screen is a component, and a component is three files named after its
+folder: the markup, the sheet, and the class that joins them. Six of them are primitives
+the rest compose — `overlay`, `panel`, `button`, `icon-button`, `toggle`, `stat`, plus an
+`icon` catalogue — and seven are regions: `hud`, `chain-meter`, `title-screen`, `interlude`,
+`briefing`, `game-over`, `settings`.
+
+Each renders into its own shadow root and adopts its own constructed stylesheet, so no
+component's CSS can land on another's markup. What still crosses the boundary is the design
+system: custom properties inherit through shadow roots, so `tokens.scss` reaches everything
+without being handed to anything. That is the whole arrangement — tokens are shared, rules
+are not.
+
+`hud.ts` is the seam. It finds the regions, forwards their events to handlers, owns the
+page-wide hotkeys, and answers `anyOverlayOpen`; `game.js` calls `showCleared` and `setStats`
+exactly as it always did and has no idea there are components behind them.
 
 ## Deploy
 
@@ -31,9 +72,37 @@ clear times on the device, which is also what happens whenever the API is unreac
 docker compose up -d --build
 ```
 
-One container, no dependencies to install and nothing to build. The pool is the only
-state: it lives in the `untangle-pool` volume, and losing that resets everyone's stage
+One container. The build runs in its own stage inside it, so there is nothing to remember
+before `docker build` and the toolchain never reaches the runtime image. The pool is the
+only state: it lives in the `untangle-pool` volume, and losing that resets everyone's stage
 times. Nothing else needs backing up.
+
+### Push to deploy
+
+`deploy/post-receive` makes `git push` the whole deployment. On the server:
+
+```bash
+git init --bare ~/untangle.git
+curl -o ~/untangle.git/hooks/post-receive ...   # or copy deploy/post-receive across
+chmod +x ~/untangle.git/hooks/post-receive
+```
+
+and from a clone:
+
+```bash
+git remote add prod user@host:untangle.git
+git push prod main
+```
+
+The hook checks the branch out into the app directory and runs the compose build. The host
+needs Docker and nothing else — no Node, no npm, no `npm ci` — because the build happens in
+the image's own stage.
+
+Deliberately git rather than rsync, for one reason: `checkout -f` leaves ignored and
+untracked files alone, so `server/data/` cannot be caught by a deploy. `rsync --delete`
+would take it, and that is everyone's stage times. Under compose the pool is a named volume
+and further out of reach still; migrating an existing one into it is a `docker cp` of
+`pool.json` to `/data/pool.json` in the running container.
 
 Behind an existing nginx, as a **subdomain** — nothing in the app needs changing:
 
@@ -77,8 +146,15 @@ other service or chaining the two, and this is one `location` block either way.
 ## Test
 
 ```bash
-node --test test/*.test.js    # or: npm test
+npm test
 ```
+
+Still `node --test`, with two additions. `test/support/register.js` teaches Node the two
+Vite import suffixes the components are built on — `?raw` for a template, `?inline` for a
+compiled sheet — so the tests run against the component sources rather than against a
+bundle; and Node's own type stripping handles the `.ts` files, which is why every import
+inside `src/ui` writes the extension out. The build runs first because one test drives the
+real static server against `dist/`.
 
 Covers the geometry primitives everything else is built on (segment intersection,
 segment-to-segment distance, crossing detection and its de-duplication rules), the
@@ -86,6 +162,16 @@ minimum-vertex-cover solver that sets each stage's move budget, the move/bank ec
 the knot tracker's farm-proof ratchet, and the stage clock — both the model in isolation
 (trimming, the margin curve, the strike-the-slowest walk past par, outlier rejection) and
 the rules about *when* it is read, which are driven through a real `Game`.
+
+The UI has two files of its own. `hud-render.test.js` mounts index.html in a real DOM
+(happy-dom) and drives the shipping components through it — element upgrade, shadow roots
+and adopted stylesheets are the mechanism here, not a detail, so a stand-in that faked them
+would be testing the stand-in. `hud-wiring.test.js` checks the seams without running
+anything: that every component is three files and one tag named after its folder, that every
+selector a class reaches for exists in its own markup, that every tag a template mounts is
+one its class imports, that every event a component emits is one something listens for, and
+that no component sheet reaches outside its own shadow root. Those run over every component
+folder rather than a list, so a new one is covered by existing.
 
 ## Dev flags
 

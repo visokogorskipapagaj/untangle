@@ -344,21 +344,41 @@ test('the rate limit lets a session through and stops a loop', () => {
 
 // --- static serving --------------------------------------------------------------------
 
-test('the game is served', async () => {
+test('the game is served, and the page can reach everything it asks for', async () => {
+  // Against the real build, and deliberately following the page's own references rather
+  // than a list of filenames written here: the bundle and the stylesheet carry content
+  // hashes, so a hardcoded path would be a test that has to be edited on every build.
   const app = await serve(new PoolStore('/dev/null'));
 
   try {
     const page = await app.call('/');
-    assert.equal(page.status, 200);
+    assert.equal(page.status, 200, 'run `npm run build` — the server serves dist/');
     assert.match(page.headers.get('content-type'), /text\/html/);
-    assert.match(await page.text(), /<canvas id="canvas">/);
 
-    const module = await app.call('/src/deadline.js');
-    assert.equal(module.status, 200);
-    assert.match(module.headers.get('content-type'), /javascript/);
+    const html = await page.text();
+    assert.match(html, /<canvas id="canvas">/, 'the board');
+    assert.match(html, /<u-hud>/, 'and the components over it');
 
-    const css = await app.call('/styles.css');
+    const script = html.match(/<script[^>]+src="\.?([^"]+)"/);
+    assert.ok(script, 'the page should load a module');
+    const bundle = await app.call(script[1]);
+    assert.equal(bundle.status, 200);
+    assert.match(bundle.headers.get('content-type'), /javascript/);
+    assert.match(
+      bundle.headers.get('cache-control'),
+      /immutable/,
+      'a content-hashed asset can be cached forever',
+    );
+
+    const link = html.match(/<link[^>]+href="\.?([^"]+\.css)"/);
+    assert.ok(link, 'and a stylesheet');
+    const css = await app.call(link[1]);
     assert.equal(css.status, 200);
+    assert.match(css.headers.get('content-type'), /text\/css/);
+
+    // The one file that must never be cached: it is what names the hashes above, so a
+    // browser holding on to it pins itself to the previous release.
+    assert.match(page.headers.get('cache-control'), /no-cache/);
   } finally {
     await app.close();
   }
@@ -368,9 +388,10 @@ test('and the rest of the checkout is not', async () => {
   const app = await serve(new PoolStore('/dev/null'));
 
   try {
-    // ROOT is a git checkout. Serving "anything under ROOT" would hand out the repository
-    // alongside the game — and note that /../package.json is not even a traversal by the
-    // time it arrives: new URL() normalises it to /package.json, an ordinary root file.
+    // The server's tree is `dist`, which holds the built game and nothing else — so the
+    // checkout is not merely disallowed, it is not in the tree at all. What still has to
+    // hold is that nothing climbs out of it: note that /../package.json is not even a
+    // traversal by the time it arrives, because new URL() normalises it to /package.json.
     const forbidden = [
       '/package.json',
       '/../package.json',
@@ -378,8 +399,11 @@ test('and the rest of the checkout is not', async () => {
       '/.git/config',
       '/server/store.js',
       '/test/pool.test.js',
+      '/src/game.js',
       '/src/../package.json',
       '/src/../../etc/passwd',
+      '/../src/ui/hud/hud.ts',
+      '/tsconfig.json',
     ];
 
     for (const path of forbidden) {

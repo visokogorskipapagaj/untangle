@@ -1,0 +1,24 @@
+/* Everything that covers the board. Centres one panel over a darkened, blurred playfield. */
+:host {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(10, 13, 19, 0.72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 10;
+}
+
+:host([hidden]) {
+  display: none;
+}
+
+/* Lighter than the rest and blurred less: the card between stages is a beat rather than a
+   stop, and the board waiting behind it is the thing worth looking at. */
+:host([variant='interlude']) {
+  background: rgba(10, 13, 19, 0.55);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}

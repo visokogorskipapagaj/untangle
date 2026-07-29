@@ -1,0 +1,17 @@
+@use '../shared/typography';
+@use '../shared/row';
+
+:host {
+  display: contents;
+}
+
+:host([hidden]) {
+  display: none;
+}
+
+/* The stage number, in the colour of the thing that just happened to it. Smaller than a
+   score, because it is a fact rather than a reward. */
+.bigscore--fail {
+  color: var(--warn);
+  font-size: 38px;
+}

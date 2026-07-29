@@ -1,0 +1,40 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+
+    "strict": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+
+    /* The game's own modules are still JavaScript and stay that way — this refactor was
+       about the UI, and the simulation has nothing to gain from being annotated. They are
+       allowed in so the UI can import them and get inferred types, but not type-checked:
+       `checkJs` would turn every untyped internal in game.js into an error in a file
+       nobody asked to convert. */
+    "allowJs": true,
+    "checkJs": false,
+
+    "noEmit": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+
+    /* Components import each other with the extension written out — `./base.ts`, not
+       `./base`. Vite resolves it, this allows it, and Node's own type stripping *requires*
+       it: that is what lets `node --test` load the component sources directly instead of
+       the tests having to run against a bundle.
+
+       `verbatimModuleSyntax` is the other half of that bargain. Node can only strip types
+       it can see are types, so every type-only import has to say `import type`. */
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+
+    /* `?raw` and `?inline` imports are Vite's, and this is the declaration that tells the
+       compiler they resolve to strings rather than to nothing. */
+    "types": ["vite/client"]
+  },
+  "include": ["src", "vite.config.ts"]
+}

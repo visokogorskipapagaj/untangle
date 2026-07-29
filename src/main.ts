@@ -1,6 +1,8 @@
+import './app.scss';
+
 import { STAGE } from './config.js';
 import { Game } from './game.js';
-import { Hud } from './hud.js';
+import { Hud } from './hud.ts';
 import { attachInput } from './input.js';
 import { Pool } from './pool.js';
 import { loadProgress } from './progress.js';
@@ -22,7 +24,7 @@ const stageParam = params.get('stage');
  *
  * `?phone=1` (or `=0`) forces it, which is how this gets tested without a phone.
  */
-function isPhone() {
+function isPhone(): boolean {
   const forced = params.get('phone');
   if (forced !== null) return forced === '1';
 
@@ -37,8 +39,8 @@ const phone = isPhone();
 const baseSeed =
   seedParam !== null ? parseInt(seedParam, 10) >>> 0 : (Math.random() * 0xffffffff) >>> 0;
 
-const stageEl = document.getElementById('stage');
-const canvas = document.getElementById('canvas');
+const stageEl = document.getElementById('stage') as HTMLElement;
+const canvas = document.getElementById('canvas') as HTMLCanvasElement;
 const renderer = new Renderer(canvas);
 const progress = loadProgress();
 
@@ -73,12 +75,12 @@ hud.setOptions(progress.options);
 const game = new Game({ renderer, hud, progress, pool, baseSeed, debug, phone });
 
 attachInput(canvas, {
-  onGrab: (x, y, isTouch) => game.onGrab(x, y, isTouch),
-  onMove: (x, y) => game.onMove(x, y),
+  onGrab: (x: number, y: number, isTouch: boolean) => game.onGrab(x, y, isTouch),
+  onMove: (x: number, y: number) => game.onMove(x, y),
   onRelease: () => game.onRelease(),
 });
 
-function fit() {
+function fit(): void {
   const rect = stageEl.getBoundingClientRect();
   game.resize(Math.max(1, Math.round(rect.width)), Math.max(1, Math.round(rect.height)));
 }
@@ -91,7 +93,7 @@ if (typeof ResizeObserver !== 'undefined') {
 fit();
 
 let last = performance.now();
-function frame(now) {
+function frame(now: number): void {
   game.update(now - last, now);
   last = now;
   game.render(now);
@@ -115,6 +117,12 @@ if (debug) {
 // Debug handles. Poke at a live stage from the browser console — `__game.combo.chain = 9`,
 // `__game.budget.bank = 20`, `__game.start(16)` — and they are what lets a headless
 // harness drive the real objects rather than a re-implementation of them.
+declare global {
+  var __game: Game;
+  var __hud: Hud;
+  var __pool: Pool | null;
+}
+
 globalThis.__game = game;
 globalThis.__hud = hud;
 globalThis.__pool = pool;

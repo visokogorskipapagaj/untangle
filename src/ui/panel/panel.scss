@@ -1,0 +1,59 @@
+:host {
+  display: block;
+  width: min(460px, 100%);
+}
+
+.panel {
+  padding: 30px 32px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  text-align: center;
+}
+
+/* Settings: a list of labelled controls, which wants a left edge to run down. */
+:host([variant='narrow']) {
+  width: min(400px, 100%);
+}
+
+:host([variant='narrow']) .panel {
+  text-align: left;
+}
+
+/**
+ * Briefings. Wider than the panels that carry a number, because this one carries sentences:
+ * 540px at this size gives a measure short enough to read as a poem. Ragged left-aligned
+ * prose for the same reason — centred body copy is a headline that got away from someone.
+ */
+:host([variant='brief']) {
+  width: min(540px, 100%);
+  /* The one panel that can outgrow a short window — the cursed card runs to four paragraphs
+     and a landscape phone is about 380px tall. It scrolls rather than being clipped, which
+     would take the button with it and leave no way out of the panel at all. */
+  max-height: 100%;
+}
+
+:host([variant='brief']) .panel {
+  text-align: left;
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Clipped, which is what holds the interlude's countdown wash to the panel's own rounded
+   corners rather than letting it square them off. Positioned, so the wash — which is
+   absolutely positioned and slotted in from outside — resolves against this box. */
+:host([variant='interlude']) .panel {
+  position: relative;
+  padding: 26px 32px 30px;
+  overflow: hidden;
+}
+
+@media (max-width: 420px) {
+  /* Pause and Play stage come to about four pixels more than the panel has room for here,
+     and the row wraps rather than squeezing — which turns a control and its primary action
+     into a stacked list of two equal choices. The padding is what gives way. */
+  :host([variant='interlude']) .panel {
+    padding: 22px 18px 26px;
+  }
+}

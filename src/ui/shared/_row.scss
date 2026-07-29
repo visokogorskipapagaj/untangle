@@ -1,0 +1,10 @@
+/**
+ * A row of buttons at the foot of a panel. Wraps rather than squeezing, because two
+ * buttons crushed to illegibility is worse than two buttons stacked.
+ */
+.row {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+}

@@ -20,6 +20,13 @@ const DATA_FILE = process.env.UNTANGLE_DATA || join(ROOT, 'server', 'data', 'poo
 const PORT = Number(process.env.PORT) || 8000;
 
 /**
+ * The built game. `npm run build` writes it and `npm start` runs that first, so the only way
+ * to arrive here without one is `npm run serve` on a clean checkout — which start() says so
+ * about rather than serving 404s and letting somebody work out why the page is blank.
+ */
+const PUBLIC_DIR = resolve(process.env.UNTANGLE_PUBLIC || join(ROOT, 'dist'));
+
+/**
  * Only what the game actually serves. An unknown extension is served as a download rather
  * than guessed at, because guessing is how a static server ends up serving something as
  * text/html that should not be.
@@ -29,6 +36,9 @@ const MIME = {
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  // The build emits source maps beside the bundle, and a map served as a download is a
+  // devtools panel that silently shows minified output instead of the component sources.
+  '.map': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.ico': 'image/x-icon',
@@ -105,23 +115,20 @@ function readBody(req) {
 }
 
 /**
- * Exactly what the game loads, and nothing else.
+ * Resolves a URL path to a servable file under PUBLIC_DIR, or null.
  *
- * "Anything under ROOT" is the obvious rule and it is wrong: ROOT is a git checkout, so it
- * would serve .git, package.json, the tests, and this server's own source alongside the
- * game. Note also that `new URL()` normalises `/../package.json` to `/package.json` before
- * anything here sees it — so a traversal check alone would have passed that through as an
- * ordinary root-level file. An allowlist does not care either way.
- */
-const STATIC_FILES = new Set(['index.html', 'styles.css']);
-const STATIC_DIRS = ['src'];
-
-/**
- * Resolves a URL path to a servable file, or null.
+ * This used to be an allowlist of two filenames and the `src` directory, because the game
+ * was served straight out of the git checkout and "anything under ROOT" would have handed
+ * out .git, package.json, the tests and this server's own source alongside it. There is a
+ * build now, and `dist` contains the built game and nothing else — so the rule can finally
+ * be the obvious one, and the checkout is out of reach because it is not in the tree being
+ * served at all.
  *
- * Resolve first, then verify: `..` segments and encodings are collapsed by resolve() and
- * the result is checked for where it actually landed, rather than the path being inspected
- * for things that look like an escape.
+ * Resolve first, then verify: `..` segments and encodings are collapsed by resolve() and the
+ * result is checked for where it actually landed, rather than the path being inspected for
+ * things that look like an escape. Note that `new URL()` normalises `/../package.json` to
+ * `/package.json` before anything here sees it — which now lands on `dist/package.json` and
+ * is simply not there.
  */
 function resolveStatic(urlPath) {
   let decoded;
@@ -133,16 +140,28 @@ function resolveStatic(urlPath) {
   if (decoded.includes('\0')) return null;
 
   const relative = normalize(decoded).replace(/^([/\\]|\.\.[/\\])+/, '');
-  const full = resolve(join(ROOT, relative === '' ? 'index.html' : relative));
-  if (full !== ROOT && !full.startsWith(ROOT + sep)) return null;
+  const full = resolve(join(PUBLIC_DIR, relative === '' ? 'index.html' : relative));
+  if (full !== PUBLIC_DIR && !full.startsWith(PUBLIC_DIR + sep)) return null;
+  return full;
+}
 
-  const inside = full.slice(ROOT.length + 1);
-  if (STATIC_FILES.has(inside)) return full;
-  return STATIC_DIRS.some((dir) => inside.startsWith(dir + sep)) ? full : null;
+/**
+ * How long the client may keep a file.
+ *
+ * Everything the build emits under `assets/` carries a content hash in its name, so a change
+ * is a new URL and the old one can never be stale — which is the one case where a year is
+ * the correct answer. index.html is the opposite: it is the thing that names those hashes,
+ * so caching it is how a browser pins itself to the previous release forever.
+ */
+function cacheFor(pathname) {
+  return pathname.startsWith('/assets/')
+    ? 'public, max-age=31536000, immutable'
+    : 'no-cache';
 }
 
 async function serveStatic(req, res) {
-  const full = resolveStatic(new URL(req.url, 'http://localhost').pathname);
+  const { pathname } = new URL(req.url, 'http://localhost');
+  const full = resolveStatic(pathname);
   if (!full) return json(res, 403, { error: 'forbidden' });
 
   let info;
@@ -156,8 +175,7 @@ async function serveStatic(req, res) {
   res.writeHead(200, {
     'content-type': MIME[extname(full).toLowerCase()] || 'application/octet-stream',
     'content-length': info.size,
-    // The game is edited and reloaded constantly; a cached module is the last thing wanted.
-    'cache-control': 'no-cache',
+    'cache-control': cacheFor(pathname),
   });
   if (req.method === 'HEAD') return res.end();
   createReadStream(full).pipe(res);
@@ -228,6 +246,15 @@ export function createApp(store) {
 
 export async function start(port = PORT, file = DATA_FILE) {
   const store = await new PoolStore(file).load();
+
+  // Said once, at startup, rather than as a blank page and a handful of 404s. `npm start`
+  // builds first, so the only way here is `npm run serve` before anything has been built.
+  try {
+    await stat(join(PUBLIC_DIR, 'index.html'));
+  } catch {
+    console.warn(`[pool] no build at ${PUBLIC_DIR} — run \`npm run build\` (or \`npm start\`)`);
+  }
+
   const server = createServer((req, res) => {
     createApp(store)(req, res).catch((err) => {
       console.error(`[pool] ${req.method} ${req.url}: ${err.message}`);

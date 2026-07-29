@@ -1,0 +1,41 @@
+<!--
+  Between stages. The one card the run still stops for, and it is a summary rather than a
+  wait: what the stage paid, what the run is worth, and the two ways to argue with the three
+  seconds it holds for.
+
+  Those three seconds are the bar — a tint draining from the top of the panel to the bottom.
+  It is first in the panel and absolutely positioned, so it paints behind the text rather
+  than over it.
+-->
+<u-overlay variant="interlude">
+  <u-panel variant="interlude">
+    <div class="timer" aria-hidden="true"><i data-el="timer"></i></div>
+    <div class="body">
+      <p class="eyebrow">Stage <span data-el="stage">1</span></p>
+      <p class="headline">CLEARED!</p>
+      <p class="points" data-el="score">0</p>
+      <p class="total">Running you a total of <span data-el="total">0</span></p>
+      <div class="row actions">
+        <!--
+          Both icons live in the button and the stylesheet shows one, keyed off `paused` on
+          this component — which setPaused already toggles, so pausing needs no second piece
+          of state. The label is a span of its own because the button's own textContent is
+          those icons: writing to it would delete them.
+        -->
+        <u-button class="pause" data-action="pause" title="Pause">
+          <u-icon class="icon-pause" name="pause"></u-icon>
+          <u-icon class="icon-play" name="play"></u-icon>
+          <span data-el="pause-label">Pause</span>
+        </u-button>
+        <!-- The green one, because it is what the player is here to do: the card is a wait,
+             and this is the way out of it. Pressing it builds the next board rather than
+             jumping over it, so it is never present but inert. -->
+        <u-button variant="primary" data-action="play" label="Play stage"
+                  title="Play stage (Enter)">
+          <u-icon name="double-arrow-right"></u-icon>
+          <span>Play stage</span>
+        </u-button>
+      </div>
+    </div>
+  </u-panel>
+</u-overlay>

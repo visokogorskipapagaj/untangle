@@ -1,0 +1,75 @@
+@use '../shared/typography';
+@use '../shared/row';
+
+:host {
+  display: contents;
+}
+
+:host([hidden]) {
+  display: none;
+}
+
+/* The panel's prose is ragged left, but the stage number over it is a caption for the whole
+   card rather than the first line of it. */
+.eyebrow {
+  text-align: center;
+}
+
+/**
+ * One card per mechanic, all of them in the panel, one of them visible — and the same
+ * attribute hides the line inside a card that does not apply, which is how the clock
+ * briefing carries both a timed and an untimed answer.
+ *
+ * Taken out of flow rather than merely made invisible: nothing here overlaps, so the panel
+ * should be the height of the card that is up.
+ */
+[hidden] {
+  display: none;
+}
+
+.brief__title {
+  margin: 0 0 18px;
+  text-align: center;
+  font-size: clamp(24px, 6vw, 34px);
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-indent: 0.16em;
+  line-height: 1.15;
+}
+
+/* Same measure and colour as `.lede`, which is the other place this game writes paragraphs.
+   Not `.lede` itself, because these run to several and that one carries a bottom margin
+   sized for being the only one. */
+.brief p {
+  margin: 0 0 14px;
+  color: var(--muted);
+  line-height: 1.65;
+  font-size: 14px;
+}
+
+.brief p:last-child {
+  margin-bottom: 0;
+}
+
+/* The words the sentence turns on. Brought up to full ink rather than given a colour: an
+   accent on every third word is a page with no emphasis left. */
+.brief strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.brief .num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* The line that is a warning rather than an explanation. Two classes, so it outranks the
+   paragraph colour above it without reaching for !important. */
+.brief .brief__warn {
+  color: var(--warn);
+}
+
+.actions {
+  margin-top: 26px;
+}

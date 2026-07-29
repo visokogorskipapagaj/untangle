@@ -1,0 +1,63 @@
+<!--
+  Briefings. One panel, one card per mechanic, opened on the stage that mechanic arrives and
+  then not again — src/config.js (BRIEFING) owns which stage opens which card, and the
+  `data-brief` names below are the other half of that join.
+
+  The prose lives here rather than in the script because it is prose. The script picks the
+  card and fills the two things that are not knowable until the stage has loaded: the number
+  on the clock, and whether there is one at all.
+-->
+<u-overlay>
+  <u-panel variant="brief">
+    <p class="eyebrow">Stage <span data-el="stage">1</span></p>
+
+    <div class="brief" data-brief="clock" hidden>
+      <p class="brief__title">THE CLOCK</p>
+      <p>Every stage is timed, and the clock starts the moment this closes. It does not
+        stop while you think about it.</p>
+      <!-- Which of these two is up is the honest answer to "how long have I got", and the
+           game genuinely does not know until the stage loads: a board nobody in the pool has
+           ever cleared has no deadline to quote. Each carries its own last line, because the
+           fail condition only exists on one of them. -->
+      <p data-el="clock-timed">This one gives you
+        <span class="num" data-el="clock-limit">&infin;</span> &mdash; how long the stage
+        actually takes people, and how long it takes <strong>you</strong> once you've cleared
+        it a few times. Run it out with knots still on the board and that's the stage.</p>
+      <p data-el="clock-untimed">Except this one. Nobody has ever cleared it, so there's
+        nothing to race and the corner reads <span class="num">&infin;</span>. What you do
+        with it now is the number you'll be racing next time.</p>
+    </div>
+
+    <div class="brief" data-brief="cursed" hidden>
+      <p class="brief__title">CURSED ROPES</p>
+      <p>The black one is not a rope you move. Grabbing it costs ten, and anything still
+        crossing it costs double to drag. Work the board <strong>around</strong> it.</p>
+      <p>It is also the biggest multiplier in the game. With a combo already running, pull
+        a rope <strong>out of</strong> its field: everything banked gets multiplied, and
+        the multiplier climbs with every further rope you haul off. Take it to
+        <span class="num">&times;10</span> and the rope detonates for free.</p>
+      <p>It cannot be started cold &mdash; build an ordinary combo on the clean ropes first,
+        then turn it onto the black rope.</p>
+      <p class="brief__warn">The window burns nearly twice as fast while cursed, and
+        parking a rope back on the black one kills the run.</p>
+    </div>
+
+    <div class="brief" data-brief="riptear" hidden>
+      <p class="brief__title">RIP &amp; TEAR</p>
+      <p class="brief__warn">Oh, stage 30 straight off the bat. Big man. Let's see it
+        then.</p>
+      <p>Par, where the clock's margin reaches zero. Heavy ropes, several cursed ones,
+        three banked moves. Nothing else.</p>
+    </div>
+
+    <div class="row actions">
+      <!-- The same double-arrow as the CLEARED card's, and for the same reason: this is the
+           same door out of the same kind of wait. -->
+      <u-button variant="primary" data-action="play" label="Play stage"
+                title="Play stage (Enter)">
+        <u-icon name="double-arrow-right"></u-icon>
+        <span>Play stage</span>
+      </u-button>
+    </div>
+  </u-panel>
+</u-overlay>

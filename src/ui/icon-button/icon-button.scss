@@ -1,0 +1,37 @@
+:host {
+  display: inline-flex;
+  /* The HUD is `pointer-events: none` so the board stays draggable underneath it. These
+     are the only things in it anyone clicks, so they are the only things that opt back in. */
+  pointer-events: auto;
+}
+
+:host([hidden]) {
+  display: none;
+}
+
+/* Deliberately not forced to full ink like the buttons on a panel: these sit over the board
+   for the whole run, and the muted-until-hovered treatment is what keeps them from
+   competing with it. `currentColor` means the icon follows that on its own. */
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  /* Sizes the one control still drawn as a codepoint rather than as artwork. */
+  font-size: 16px;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--ink);
+    border-color: rgba(232, 236, 244, 0.3);
+  }
+}
+
+::slotted(u-icon) {
+  width: 17px;
+  height: 17px;
+}

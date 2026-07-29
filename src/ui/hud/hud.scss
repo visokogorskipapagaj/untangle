@@ -1,0 +1,61 @@
+:host {
+  position: absolute;
+  inset: 0 0 auto 0;
+  /* The board is draggable underneath the whole strip; only the two buttons opt back in. */
+  pointer-events: none;
+}
+
+/* Three tracks so the middle group stays optically centred regardless of how wide the stage
+   counter or the score readout happen to get. */
+.bar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  padding-top: max(10px, env(safe-area-inset-top));
+  background: linear-gradient(to bottom, rgba(10, 13, 19, 0.85), transparent);
+}
+
+.group {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.group--center {
+  justify-self: center;
+}
+
+.group--right {
+  justify-self: end;
+}
+
+/* The dividers between readouts. The bank is excluded because it is the one stat with a
+   border radius, and it draws its own divider as a pseudo-element instead — a 1px border on
+   a rounded box follows the corners round and draws a bent stroke rather than a line. */
+u-stat + u-stat:not([variant='bank']) {
+  border-left-color: var(--line);
+}
+
+.group--right u-stat {
+  text-align: right;
+}
+
+/* Icon buttons sit as a pair, closer to each other than to the stats they follow. */
+u-icon-button {
+  margin-left: 12px;
+}
+
+u-icon-button + u-icon-button {
+  margin-left: 8px;
+}
+
+@media (max-width: 640px) {
+  /* Six stats and two buttons will not fit. Restart is the one that gets used mid-run and
+     the one there is no other way to reach on a touchscreen, where there is no R key — so
+     settings, which is a thing you set once, is the one that goes. */
+  [data-action='settings'] {
+    display: none;
+  }
+}
