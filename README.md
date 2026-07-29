@@ -6,6 +6,10 @@ Every stage grants a limited number of moves. Spend fewer than you're given and 
 bank for later; run the stage grant *and* the bank dry without solving and the stage is
 lost. Rip several knots apart with one pull for a combo.
 
+There is also a clock, and it is one you set yourself: a stage you have never cleared is
+untimed, and the time it took you becomes the deadline you're held to next time — with
+progressively less of it handed back as the stages get harder.
+
 Vanilla JS, Canvas 2D, native ES modules. No dependencies, no build step.
 
 ## Run
@@ -25,7 +29,9 @@ node --test test/*.test.js    # or: npm test
 Covers the geometry primitives everything else is built on (segment intersection,
 segment-to-segment distance, crossing detection and its de-duplication rules), the
 minimum-vertex-cover solver that sets each stage's move budget, the move/bank economy,
-and the knot tracker's farm-proof ratchet.
+the knot tracker's farm-proof ratchet, and the stage clock — both the model in isolation
+(trimming, the margin curve, the strike-the-slowest walk past par, outlier rejection) and
+the rules about *when* it is read, which are driven through a real `Game`.
 
 ## Dev flags
 
@@ -62,6 +68,65 @@ crosses nothing, and the cheapest way to solve a stage is the cheapest set of ro
 removal leaves the rest crossing-free. That is exactly **minimum weighted vertex cover**
 on the knot graph (`src/solver.js`), computed exactly by branch-and-bound. The stage
 grants `ceil(cover × SLACK)`; whatever is unspent banks.
+
+**The stage clock has no starting time**, because it isn't given one. A stage you have
+never cleared runs **untimed** — the clock only measures it — and that measurement is what
+puts a deadline on every later attempt. The game has no opinion about how long a board
+should take; it only has a record of how long *you* take (`src/deadline.js`).
+
+The model is three steps and nothing else. **Trim** the extremes off the stage's recorded
+times — top and bottom 10%, so the run interrupted by the doorbell and the freak lucky
+board both drop out. **Average** what survives. **Add a margin** for the stage:
+
+| stage | 1 | 5 | 10 | 15 | 20 | 25 | **30+** |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| margin | +40% | +34% | +28% | +21% | +14% | +7% | **+0%** |
+
+So a stage you average 10 seconds on gives you 14 seconds at stage 1, 12.1 at stage 15,
+and exactly 10 at stage 30. For most of that stretch the clock is a thing in the corner you
+never have to think about.
+
+**Past stage 30 the margin does not go negative — the average does the tightening.** Each
+stage past par strikes the slowest surviving run off before averaging, so the target slides
+from "a run like your usual ones" to "a run like your better ones" and finally to your best
+one, where it stops. With twelve runs on record from 42s to 75s:
+
+| stage | 30 | 33 | 35 | 37 | 39+ |
+| --- | --- | --- | --- | --- | --- |
+| runs counted | 10 | 7 | 5 | 3 | 1 |
+| deadline | 0:59 | 0:54 | 0:51 | 0:48 | **0:45** |
+
+**This is why there is no floor anywhere in the clock.** Every deadline it can produce is
+the mean of runs you actually completed on that stage, so the tightest one it can ever
+reach is a single time you have already proved you can hit. A model built only from
+measurements cannot describe an impossible stage, so it needs nothing protecting it from
+one — and trimming the *fast* end is what stops a freak clear becoming that permanent
+target. Only clears are recorded; a stage lost to the clock teaches it nothing, which is
+the point — filing it would teach the model that the stage takes exactly as long as the
+deadline it just failed.
+
+The clock stops behind an open dialog, and the deadline is judged **at the drop**: a rope
+released with a tenth of a second to spare has landed, and the unscored settle running on
+past zero cannot take that back. Hold a rope past the buzzer and it is judged late — a
+stage cannot be won by standing still until the answer arrives.
+
+**A stage does not end in a scoreboard.** It ends in a card carrying the two numbers worth
+carrying — what the stage paid, big, and the run total under it, small — which holds for
+three seconds, swipes off to the left, and reveals the next stage already counting itself
+in: `3.00` down to `0.00`, then `GO`, then the board is yours. Every route into a stage
+runs through that countdown, retries included, so the board is always visible and never
+touchable before the count ends. The run keeps moving by default and **Pause game**, below
+the card, is the only thing that stops it; the stage clock does not start until GO does, so
+nothing in the sequence is charged to the player.
+
+Everything else a breakdown used to list — per-move, tightness, efficiency, carried moves —
+is still tracked and still feeds the score; it is simply not worth a stop between every
+stage, and `?debug=1` has it live. Best per stage and the clear time the clock learns from
+are still banked on every clear.
+
+**Rip & Tear**, on the title screen, skips straight to stage 30 — par, where the margin
+reaches zero — with the run's usual cushion and nothing else. Its countdown has something
+to say about the decision.
 
 **Heavy ropes** are drawn thicker and cost 2 (or later, 3) moves to drag. Doubles start
 at stage 4, a triple becomes possible from stage 9, and they never exceed 40% of a stage.
@@ -293,8 +358,8 @@ so one gesture gets one deterministic evaluation, priced against that gesture's 
 
 Distance is the summed displacement of *every* node. It is normalized against the viewport
 diagonal as it is banked — so a phone and a 32" monitor score the same play identically,
-and a mid-stage resize cannot retroactively re-value work already done — and displayed in
-real centimetres for flavour.
+and a mid-stage resize cannot retroactively re-value work already done. It is an input to
+the score rather than a readout of its own; `?debug=1` is where to see it.
 
 A pair only pays out when its knot count drops below the lowest it has *ever* been,
 so re-tangling two ropes and pulling them apart again earns nothing.

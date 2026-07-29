@@ -23,12 +23,21 @@ const HEIGHT = 900;
 function stubHud() {
   return {
     calls: [],
-    hideSolved() {},
     hideGameOver() {},
     hideTitle() {},
-    showSolved(s) {
-      this.calls.push(['solved', s]);
+    showCleared(info) {
+      this.calls.push(['cleared', info]);
     },
+    showCountdown(stage, taunt) {
+      this.calls.push(['countdown', { stage, taunt }]);
+    },
+    setCountdown(text) {
+      this.countdown = text;
+    },
+    setPaused(paused) {
+      this.paused = paused;
+    },
+    hideInterlude() {},
     showGameOver(s) {
       this.calls.push(['gameover', s]);
     },

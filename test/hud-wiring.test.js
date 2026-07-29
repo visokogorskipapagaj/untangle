@@ -48,7 +48,7 @@ test('no text-bearing stat key points at a layout container', () => {
   const containers = new Set(['stage', 'hud', 'canvas']);
   const map = elementMapSource();
 
-  const statKeys = ['stage', 'knots', 'movesLeft', 'bank', 'distance', 'score'];
+  const statKeys = ['stage', 'time', 'knots', 'movesLeft', 'bank', 'score'];
   for (const key of statKeys) {
     const match = map.match(new RegExp(`^ {6}${key}: \\$\\('([A-Za-z0-9_-]+)'\\)`, 'm'));
     assert.ok(match, `setStats writes to this.el.${key}, so the map must define it`);
@@ -105,7 +105,24 @@ test('every button the HUD binds exists, and every overlay it toggles exists', (
     assert.ok(htmlIds.has(id), `hud.js binds #${id}, which index.html does not define`);
   }
 
-  for (const id of ['overlay-title', 'overlay-solved', 'overlay-gameover', 'overlay-settings']) {
+  for (const id of ['overlay-title', 'overlay-interlude', 'overlay-gameover', 'overlay-settings']) {
     assert.ok(htmlIds.has(id), `${id} must exist`);
+  }
+});
+
+test('the swipe duration is the same number in the script and the stylesheet', () => {
+  // The script decides when the incoming card starts counting; the stylesheet decides how
+  // long it takes to arrive. Change one and the count starts against a card still sliding,
+  // or the card sits finished and waits — neither of which shows up as an error anywhere.
+  const config = readFileSync(join(root, 'src/config.js'), 'utf8');
+  const css = readFileSync(join(root, 'styles.css'), 'utf8');
+
+  const declared = config.match(/SWIPE_MS:\s*(\d+)/);
+  assert.ok(declared, 'INTERLUDE.SWIPE_MS should be declared in config.js');
+
+  const animated = [...css.matchAll(/\.panel--interlude\.is-(?:leaving|entering)\s*\{\s*\n\s*animation:[^;]*?(\d+)ms/g)];
+  assert.equal(animated.length, 2, 'both swipe animations should carry an explicit duration');
+  for (const [, ms] of animated) {
+    assert.equal(ms, declared[1], `CSS swipe runs ${ms}ms, config says ${declared[1]}ms`);
   }
 });

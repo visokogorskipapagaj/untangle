@@ -1,4 +1,13 @@
-import { COMBO, CURSED, ROPE } from './config.js';
+import { COMBO, CURSED, INTERLUDE, ROPE } from './config.js';
+import {
+  expectedTime,
+  recordClear,
+  runsCounted,
+  slackFor,
+  slowestStruck,
+  StageClock,
+  stageDeadline,
+} from './deadline.js';
 import { generateStage, keepInside, playMargin } from './generator.js';
 import { clamp, nearestOnPolyline } from './geometry.js';
 import { MoveBudget } from './moves.js';
@@ -39,6 +48,11 @@ export class Game {
     this.renderer = renderer;
     this.hud = hud;
     this.progress = progress;
+    // A record written before the clock existed has no times, and the clock reads and
+    // writes this on every stage. Nothing to migrate — an empty history is exactly a new
+    // player's, so those stages simply run untimed again — but it has to be an object
+    // before the first clear is filed into it.
+    this.progress.times ||= {};
     this.baseSeed = baseSeed;
     this.debug = debug;
     /** Phones play a thinned board — see STAGE.PHONE_SCALE. Fixed for the whole run. */
@@ -54,6 +68,7 @@ export class Game {
     this.tracker = null;
     this.score = new ScoreKeeper();
     this.budget = new MoveBudget();
+    this.clock = new StageClock();
     this.stageScores = new Map();
     this.knotMarkers = [];
     this.flashes = [];
@@ -75,13 +90,27 @@ export class Game {
     this.settle = null;
     this.pointer = { x: 0, y: 0 };
     this.stageInfo = null;
+
+    /**
+     * The between-stages sequence, or null while a stage is being played. Phases run
+     * cleared -> swipe -> countdown -> go, and the last one hands the board over.
+     */
+    this.interlude = null;
+    /** Holds the sequence where it stands. Only ever set from the PAUSE button. */
+    this.paused = false;
   }
 
   // --- lifecycle -------------------------------------------------------------
 
+  /**
+   * Builds a board and leaves it sitting in `intro`, untouchable.
+   *
+   * Deliberately does not decide what happens next: the countdown that hands the board
+   * over is the interlude's job, and the solved path needs the board swapped *underneath*
+   * a card that is still sliding. Every route in goes through #enterStage.
+   */
   loadStage(stage) {
     this.stage = stage;
-    this.hud.hideSolved();
     this.hud.hideGameOver();
     this.grab = null;
     this.settle = null;
@@ -126,37 +155,65 @@ export class Game {
     this.tracker = new TangleTracker(this.ropes);
     this.score.beginStage(Math.hypot(this.width, this.height));
     this.budget.beginStage(info.moves.ideal, info.moves.bonus);
+    // Null for a stage the player has never cleared, which is what makes a first look at
+    // a board untimed — see deadline.js.
+    this.clock.begin(stageDeadline(stage, this.progress.times));
     this.tracker.collectPoints(this.knotMarkers);
-    this.state = 'playing';
+    this.state = 'intro';
+  }
+
+  /** Loads a stage and counts the player into it. */
+  #enterStage(stage, taunt = false) {
+    this.loadStage(stage);
+    this.#beginCountdown(taunt);
   }
 
   /** Begins a fresh run: banked moves and accumulated score both start over. */
-  start(stage = 1) {
+  start(stage = 1, taunt = false) {
     this.hud.hideTitle();
     this.stageScores.clear();
     this.budget.resetRun();
-    this.loadStage(stage);
+    this.#enterStage(stage, taunt);
+  }
+
+  /**
+   * Straight in at the deep end, with the run's cushion and nothing else. The taunt is the
+   * point of the button, so it rides along to the countdown that answers for it.
+   */
+  ripAndTear() {
+    this.start(INTERLUDE.RIP_AND_TEAR_STAGE, true);
   }
 
   nextStage() {
-    this.loadStage(this.stage + 1);
+    this.#enterStage(this.stage + 1);
   }
 
   retryStage() {
     if (this.state === 'title') return;
-    this.loadStage(this.stage);
+    this.#enterStage(this.stage);
   }
 
   /** Game over: the stage is replayable, but the bank is gone. */
   retryAfterGameOver() {
     this.budget.clearBank();
-    this.loadStage(this.stage);
+    this.#enterStage(this.stage);
+  }
+
+  /** PAUSE, and the same button again to resume. Only the interlude can be held. */
+  togglePause() {
+    if (!this.interlude) return;
+    this.paused = !this.paused;
+    this.hud.setPaused(this.paused);
   }
 
   restart() {
     this.progress.total = 0;
     this.progress.maxStage = 1;
     this.progress.best = {};
+    // Clear times deliberately survive. They are a record of how fast this player works,
+    // not of how far they got, and starting the ladder again does not make them someone
+    // else — wiping them would also make "restart" the way to take the clock off a stage
+    // that had got hard, which is the one thing the deadline must not be escapable by.
     saveProgress(this.progress);
     this.hud.hideSettings();
     this.start(1);
@@ -324,6 +381,13 @@ export class Game {
       // during it is not the player parking it there.
       late: this.#chainRunning() && this.chainTimer <= 0,
       created: this.tracker.createdSinceMark(),
+      // The stage clock, judged at the same instant and for the same reason. A rope
+      // released with a moment to spare has landed, and the settle running on past the
+      // buzzer is the game's time, not the player's — so a drop that clears the board at
+      // 0.1s left is a win even though it finishes resolving after zero. Held past the
+      // buzzer instead and this latches true: standing still with a rope in hand is not a
+      // way to stop the clock.
+      expired: this.clock.expired,
     };
   }
 
@@ -495,10 +559,72 @@ export class Game {
     return true;
   }
 
+  // --- between stages --------------------------------------------------------
+
+  /** Opens the countdown card. `taunt` is Rip & Tear's, and nothing else sets it. */
+  #beginCountdown(taunt = false) {
+    this.paused = false;
+    this.interlude = { phase: 'countdown', remaining: INTERLUDE.COUNTDOWN_MS };
+    this.hud.showCountdown(this.stage, taunt);
+    this.hud.setCountdown(countdownText(INTERLUDE.COUNTDOWN_MS));
+    this.hud.setPaused(false);
+  }
+
+  /**
+   * Steps the sequence.
+   *
+   * The swipe is the one phase PAUSE cannot hold: it is a transition rather than a beat,
+   * the stylesheet is already running it, and freezing the clock underneath a CSS
+   * animation would strand one card halfway across the screen.
+   */
+  #updateInterlude(dt) {
+    const stage = this.interlude;
+    if (this.paused && stage.phase !== 'swipe') return;
+
+    stage.remaining -= dt;
+
+    if (stage.remaining > 0) {
+      if (stage.phase === 'countdown') this.hud.setCountdown(countdownText(stage.remaining));
+      return;
+    }
+
+    switch (stage.phase) {
+      case 'cleared':
+        // The next board is built here, underneath a card that is about to slide off it,
+        // so what the countdown counts into is already there behind the panel.
+        this.loadStage(this.stage + 1);
+        stage.phase = 'swipe';
+        stage.remaining = INTERLUDE.SWIPE_MS;
+        this.hud.showCountdown(this.stage, false);
+        this.hud.setCountdown(countdownText(INTERLUDE.COUNTDOWN_MS));
+        break;
+
+      case 'swipe':
+        // Counting only starts once the card has arrived. A number ticking down while it
+        // is still sliding reads as time the player was charged for before they could see.
+        stage.phase = 'countdown';
+        stage.remaining = INTERLUDE.COUNTDOWN_MS;
+        break;
+
+      case 'countdown':
+        stage.phase = 'go';
+        stage.remaining = INTERLUDE.GO_MS;
+        this.hud.setCountdown('GO');
+        break;
+
+      default:
+        this.interlude = null;
+        this.hud.hideInterlude();
+        this.state = 'playing';
+    }
+  }
+
   // --- simulation ------------------------------------------------------------
 
   update(dtMs, now) {
     const dt = Math.min(dtMs, MAX_DT);
+
+    if (this.interlude) this.#updateInterlude(dt);
 
     if (this.grab) this.#updateDrag();
     else if (this.settle) this.#updateSettle(dt);
@@ -519,6 +645,20 @@ export class Game {
     if (this.pending) {
       this.pending.delay -= dt;
       if (this.pending.delay <= 0) this.#finishStage();
+    }
+
+    // The stage clock runs while the stage is being played and at no other time. A dialog
+    // over the board is the one case that has to be excluded: the player cannot touch a
+    // rope through it, so charging them for it would mean the settings button quietly
+    // costs a run. Everything else — thinking, dragging, settling — is play, and is timed.
+    const ticking = this.state === 'playing' && !this.hud.anyOverlayOpen;
+    if (ticking) {
+      this.clock.tick(dt);
+      // Same guard the combo uses, for the same reason: a rope already dropped is a
+      // landing #endGesture has not scored yet and carries its own latched verdict, and a
+      // rope still in hand is judged when it is let go. Ending the stage from underneath
+      // either would take away a move the player had already made.
+      if (this.clock.expired && !this.grab && !this.settle) this.#timeUp();
     }
 
     // The window runs in real time from the *priming* drop — while the player is thinking,
@@ -545,7 +685,9 @@ export class Game {
       // spent and knots are still on the board, every further move comes out of savings
       // — so the warning has to be up before the player commits to one, not after.
       drawingFromBank: this.budget.stageLeft === 0 && knots > 0,
-      distancePx: this.score.distancePx,
+      // Infinity on a stage with no record, which the readout shows as such. There is no
+      // separate "untimed" flag to keep in step with the number.
+      timeLeft: this.clock.remaining,
       // Projected, not banked: the pot is the player's, it is just not final yet.
       score: this.score.projected(this.cursedMult),
       chain: this.chain,
@@ -670,10 +812,11 @@ export class Game {
    * timing, and what stops a fast whip banking points on a separation that did not last.
    */
   #endGesture(gesture) {
-    // Both latched at the drop by onRelease. Did this move put a fresh knot on the board
+    // All latched at the drop by onRelease. Did this move put a fresh knot on the board
     // — you untangled several ropes and then parked the one you were holding on another —
-    // and was the rope let go of before the window ran out?
-    const { created, late, curse, weight } = gesture;
+    // was the rope let go of before the combo window ran out, and was it let go of before
+    // the stage clock did?
+    const { created, late, curse, weight, expired } = gesture;
     let events = this.tracker.commit();
     let resolved = events.reduce((sum, e) => sum + e.resolved, 0);
 
@@ -720,66 +863,90 @@ export class Game {
     // Out of moves is not only "zero left" — with heavy ropes on the board, being unable
     // to afford even the cheapest remaining rope is just as dead.
     const stuck = this.budget.totalLeft < this.#cheapestMove();
-    const finish = this.tracker.count === 0 ? 'solve' : stuck ? 'gameover' : null;
+    // The clock outranks the board. This is the rope that was still in hand when the
+    // buzzer went, so whatever it just achieved, it achieved out of time — a stage cannot
+    // be won by holding a rope until the answer arrives.
+    const finish = expired
+      ? 'gameover'
+      : this.tracker.count === 0
+        ? 'solve'
+        : stuck
+          ? 'gameover'
+          : null;
     if (!finish) return;
 
-    // A chain still running when the stage ends has to be paid out before the stage is
-    // scored, or the pot would simply vanish.
-    this.#cashCombo(false);
+    this.#endStage(finish, expired ? 'time' : 'moves');
+  }
 
-    // Let a combo callout land before the panel covers the board. `ending` freezes
-    // input for that beat, so the stage cannot be touched while it plays out.
+  /** The clock ran out with nothing in flight. */
+  #timeUp() {
+    this.#endStage('gameover', 'time');
+  }
+
+  /**
+   * The single way out of a stage, however it ended.
+   *
+   * A chain still running has to be paid out before the stage is scored, or the pot would
+   * simply vanish — and that is as true of a stage lost to the clock as of one solved.
+   * Then `ending` freezes input for a beat so a combo callout can land before the panel
+   * covers the board.
+   */
+  #endStage(finish, reason) {
+    this.#cashCombo(false);
     this.state = 'ending';
-    this.pending = { finish, delay: this.banner ? BANNER_HOLD_MS : 0 };
+    this.pending = { finish, reason, delay: this.banner ? BANNER_HOLD_MS : 0 };
     if (this.pending.delay <= 0) this.#finishStage();
   }
 
   #finishStage() {
-    const { finish } = this.pending;
+    const { finish, reason } = this.pending;
     this.pending = null;
     if (finish === 'solve') this.#solveStage();
-    else this.#gameOver();
+    else this.#gameOver(reason);
   }
 
+  /**
+   * A cleared stage banks everything it earned and then gets out of the way.
+   *
+   * The run's numbers are still kept — best per stage, the run total, the clear time the
+   * clock learns from — they are simply no longer read out at the player mid-run. A
+   * scoreboard between every stage is a stop, and the stage after this one is already
+   * being built behind the card that says you cleared this one.
+   */
   #solveStage() {
-    this.state = 'solved';
+    this.state = 'cleared';
 
     const score = this.score.score;
-    const carried = this.budget.settleStage();
     const key = String(this.stage);
     const previousBest = this.progress.best[key] || 0;
 
+    // Banks whatever the stage did not spend. Nothing reads the carry now that the
+    // breakdown is gone, but the bank it feeds is on screen throughout the next stage.
+    this.budget.settleStage();
+
     this.stageScores.set(this.stage, score);
     const runTotal = [...this.stageScores.values()].reduce((sum, v) => sum + v, 0);
+
+    // Filed before anything else can touch the clock, and filed for the untimed first
+    // clear above all — that clear is the only reason the stage can ever be timed at all.
+    recordClear(this.progress.times, this.stage, this.clock.elapsed);
 
     this.progress.best[key] = Math.max(previousBest, score);
     this.progress.maxStage = Math.max(this.progress.maxStage, this.stage);
     this.progress.total = Math.max(this.progress.total, runTotal);
     saveProgress(this.progress);
 
-    this.hud.showSolved({
-      stage: this.stage,
-      score,
-      perMove: this.score.perMove,
-      untangles: this.score.untangles,
-      ideal: this.budget.ideal,
-      bonus: this.budget.bonus,
-      used: this.score.moves,
-      carried,
-      bank: this.budget.bank,
-      bestCombo: this.score.bestCombo,
-      bestCursed: this.score.bestCursed,
-      distancePx: this.score.distancePx,
-      avgTightness: this.score.avgTightness,
-      avgEfficiency: this.score.avgEfficiency,
-      best: previousBest,
-      total: runTotal,
-    });
+    this.paused = false;
+    this.interlude = { phase: 'cleared', remaining: INTERLUDE.CLEARED_MS };
+    // What the stage paid, and what the run is worth now. The two numbers the player
+    // actually wants off a scoreboard, without the scoreboard.
+    this.hud.showCleared({ stage: this.stage, score, total: runTotal });
+    this.hud.setPaused(false);
   }
 
-  #gameOver() {
+  #gameOver(reason = 'moves') {
     this.state = 'gameover';
-    this.hud.showGameOver({ stage: this.stage, knots: this.tracker.count });
+    this.hud.showGameOver({ stage: this.stage, knots: this.tracker.count, reason });
   }
 
   // --- render ----------------------------------------------------------------
@@ -830,6 +997,15 @@ export class Game {
       `combo x${this.chain}${this.#cursed() ? `  CURSED x${this.cursedMult}` : ''}` +
         `  knots ${this.score.comboKnots}  accrued ${this.score.comboScore.toFixed(0)}  shown ${this.score.comboValue(this.cursedMult).toFixed(0)}` +
         `  window ${this.chainTimer.toFixed(0)}ms  burn x${this.#burnRate()}`,
+      // Spelled out end to end, because "where did that number come from" is the one
+      // question a self-calibrating deadline has to be able to answer on demand.
+      `clock ${(this.clock.elapsed / 1000).toFixed(1)}s / ` +
+        (this.clock.timed ? `${(this.clock.limit / 1000).toFixed(1)}s` : 'untimed') +
+        `  runs ${(this.progress.times[String(this.stage)] || []).length}` +
+        ` -> counted ${runsCounted(this.stage, this.progress.times).length}` +
+        ` (struck ${slowestStruck(this.stage)})` +
+        `  avg ${((expectedTime(this.stage, this.progress.times) || 0) / 1000).toFixed(1)}s` +
+        `  slack ${slackFor(this.stage).toFixed(2)}`,
       `state ${this.state}${this.grab ? '  grabbing' : ''}${this.settle ? '  settling' : ''}`,
     ].filter(Boolean);
   }
@@ -837,4 +1013,9 @@ export class Game {
 
 function midpointOf(rope) {
   return rope.nodes[(rope.nodes.length / 2) | 0];
+}
+
+/** "3.00" down to "0.00". Hundredths because a number moving that fast reads as urgent. */
+function countdownText(remaining) {
+  return (Math.max(0, remaining) / 1000).toFixed(2);
 }

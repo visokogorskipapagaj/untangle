@@ -356,6 +356,104 @@ export const COMBO = {
   ],
 };
 
+/**
+ * The stage clock.
+ *
+ * There is deliberately no starting time in here, because there is no starting time. A
+ * stage the player has never cleared runs *untimed* — the clock only measures it — and
+ * every later attempt is given a deadline derived from what they actually did on it. The
+ * game has no opinion about how long a board should take; it only has a record of how
+ * long this player takes, so the pressure is calibrated to them rather than to a number
+ * someone picked. See deadline.js for the model these knobs drive.
+ */
+export const CLOCK = {
+  /**
+   * Fraction thrown away from each end of a stage's samples before averaging. One run
+   * interrupted by the doorbell and one lucky board are both spikes, and neither says
+   * anything about how long the stage takes.
+   *
+   * Cutting the *fast* end matters as much as the slow one, and more so later: past par
+   * the deadline walks down toward the quickest run on record, and a freak clear nobody
+   * could repeat would otherwise become the permanent target.
+   */
+  TRIM: 0.1,
+
+  /**
+   * Samples kept per stage, oldest out first. The model is meant to track the player the
+   * game currently has, not the one who fumbled through the stage a hundred runs ago — a
+   * window that never forgets would hold the deadline open long after they outgrew it.
+   *
+   * It is also the length of the endgame: past par one more run is struck off the average
+   * every stage, so a full window is a fifteen-stage runway before the deadline arrives at
+   * the fastest run and stops.
+   */
+  KEEP: 20,
+
+  /**
+   * How far from the stage's own typical time a single new sample may sit before it is
+   * pulled back in. A stage left open while the player answered the door is not a slow
+   * clear, it is not a clear at all, and with few samples the trim cannot yet reject it.
+   */
+  OUTLIER: 4,
+
+  /**
+   * The pressure curve, in two halves that meet at exactly 1.0 — and the halves work by
+   * different means, which is the point.
+   *
+   * Up to PAR_STAGE the deadline is the player's average plus a margin: SLACK_START at
+   * stage 1, tapering to nothing. For most of that stretch the clock is a thing in the
+   * corner they never have to think about.
+   *
+   * At PAR_STAGE the margin is gone and the deadline is the average itself. Past it the
+   * margin cannot go negative — instead the *average* tightens, by striking the slowest
+   * surviving run off it once per stage (see slowestStruck). The endgame therefore walks
+   * from "your typical run" to "your best run" and stops there.
+   *
+   * That is why there is no floor in here. Every deadline the game ever sets is the mean
+   * of times this player actually recorded on this stage, so the tightest one it can reach
+   * is a single run they have already proved they can do. There is nothing to estimate and
+   * nothing to guard against: the data cannot describe a stage nobody can clear.
+   */
+  SLACK_START: 1.4,
+  PAR_STAGE: 30,
+
+  /** Readout thresholds: amber, then red and counting in tenths. */
+  WARN_MS: 10000,
+  CRITICAL_MS: 5000,
+};
+
+/**
+ * Between stages.
+ *
+ * A stage does not end in a scoreboard. It ends in a card that says you cleared it, which
+ * slides away to reveal the next stage already counting itself in — the run keeps moving,
+ * and the only thing that stops it is the player deciding to stop it. PAUSE is that
+ * decision, and it is the reason the sequence can be this pushy: nothing is taken away
+ * from a player who wants a moment, it just is not the default.
+ *
+ * The countdown is shown to hundredths, which is not a precision anyone reads. It is there
+ * because a number moving that fast reads as a thing about to happen, where whole seconds
+ * read as a thing being waited for.
+ */
+export const INTERLUDE = {
+  /** How long the CLEARED card holds before it slides away. */
+  CLEARED_MS: 3000,
+
+  /**
+   * The swipe between the two cards. Must match the CSS animation on `.panel--interlude`
+   * — the JS owns when the next card starts counting, the stylesheet owns how it arrives,
+   * and the two only line up if this number is the same in both places.
+   */
+  SWIPE_MS: 450,
+
+  /** The count itself, and the beat GO holds for before the board is handed over. */
+  COUNTDOWN_MS: 3000,
+  GO_MS: 500,
+
+  /** Where "Rip & Tear" drops the player. */
+  RIP_AND_TEAR_STAGE: 30,
+};
+
 export const SCORING = {
   /** Points a perfectly-played untangle is worth before modifiers. */
   BASE: 100,
@@ -391,6 +489,3 @@ export const PALETTE = {
   /** Lightness jitter also shrinks with the hue spread. */
   LIGHT_JITTER: 9,
 };
-
-/** CSS px -> centimetres. The CSS spec fixes 1in at 96px. */
-export const PX_PER_CM = 96 / 2.54;

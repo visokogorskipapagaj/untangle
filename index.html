@@ -19,6 +19,13 @@
       </div>
 
       <div class="hud__group hud__group--center">
+        <!-- Starts untimed, which is also the resting state: the first frame of a stage
+             with no record would otherwise flash a bright infinity sign before setStats
+             dims it. -->
+        <div class="stat stat--time is-untimed">
+          <span class="stat__label">Time</span>
+          <span class="stat__value" id="stat-time">&infin;</span>
+        </div>
         <div class="stat stat--knots">
           <span class="stat__label">Knots</span>
           <span class="stat__value" id="stat-knots">0</span>
@@ -36,10 +43,6 @@
       </div>
 
       <div class="hud__group hud__group--right">
-        <div class="stat stat--distance">
-          <span class="stat__label">Rope moved</span>
-          <span class="stat__value" id="stat-distance">0 cm</span>
-        </div>
         <div class="stat stat--score">
           <span class="stat__label">Score</span>
           <span class="stat__value" id="stat-score">0</span>
@@ -58,41 +61,49 @@
         <p class="lede">Pick up the ropes. Pull them apart until nothing crosses.<br>
           Every stage grants a limited number of moves. Spend fewer than you're given and
           the rest bank for later &mdash; run out of both and the stage is lost.<br>
-          Rip several knots apart in one pull for a combo.</p>
-        <button id="btn-start" class="btn btn--primary" type="button">Start</button>
+          Rip several knots apart in one pull for a combo.<br>
+          A stage you have never cleared is untimed. Clear it and the clock learns your
+          pace &mdash; and from there on it hands back less of it every stage.</p>
+        <div class="row">
+          <button id="btn-start" class="btn btn--primary" type="button">Start</button>
+          <button id="btn-riptear" class="btn btn--danger" type="button">Rip &amp; Tear</button>
+        </div>
+        <p class="hint">Rip &amp; Tear drops you straight into stage 30.</p>
         <p class="hint" id="title-best"></p>
       </div>
     </div>
 
-    <!-- Stage complete -->
-    <div id="overlay-solved" class="overlay is-hidden">
-      <div class="panel">
-        <p class="eyebrow">Stage <span id="solved-stage">1</span> clear</p>
-        <p class="bigscore" id="solved-score">0</p>
-        <dl class="breakdown">
-          <div><dt>Untangles</dt><dd id="solved-untangles">0</dd></div>
-          <div><dt>Best combo</dt><dd id="solved-combo">&mdash;</dd></div>
-          <div><dt>Per move</dt><dd id="solved-permove">0</dd></div>
-          <div><dt>Moves</dt><dd id="solved-moves">0 / 0</dd></div>
-          <div><dt>Carried over</dt><dd id="solved-carried">+0</dd></div>
-          <div><dt>Bank</dt><dd id="solved-bank">0</dd></div>
-          <div><dt>Rope moved</dt><dd id="solved-distance">0 cm</dd></div>
-          <div><dt>Avg tightness</dt><dd id="solved-tightness">&times;1.00</dd></div>
-          <div><dt>Avg efficiency</dt><dd id="solved-efficiency">100%</dd></div>
-          <div><dt>Best for stage</dt><dd id="solved-best">&mdash;</dd></div>
-        </dl>
-        <p class="total">Run total <span id="solved-total">0</span></p>
-        <div class="row">
-          <button id="btn-retry" class="btn" type="button">Retry stage</button>
-          <button id="btn-next" class="btn btn--primary" type="button">Next stage</button>
+    <!--
+      Between stages. Two cards share one grid cell so the outgoing one can slide left
+      while the incoming one slides in from the right; the pause button sits below both
+      and deliberately outside the stack, so it holds still while they move.
+    -->
+    <div id="overlay-interlude" class="overlay overlay--interlude is-hidden">
+      <div class="interlude">
+        <div class="interlude__stack">
+          <div class="panel panel--interlude is-hidden" id="card-cleared">
+            <p class="eyebrow">Stage <span id="cleared-stage">1</span></p>
+            <p class="interlude__headline">CLEARED!</p>
+            <p class="interlude__points" id="cleared-score">0</p>
+            <p class="interlude__total">Run total <span id="cleared-total">0</span></p>
+          </div>
+          <div class="panel panel--interlude is-hidden" id="card-countdown">
+            <p class="eyebrow">Stage</p>
+            <p class="interlude__headline" id="countdown-stage">1</p>
+            <p class="interlude__count" id="countdown-value">3.00</p>
+            <p class="interlude__taunt is-hidden" id="countdown-taunt">
+              So you think you're hot shit, eh? Let's see :)
+            </p>
+          </div>
         </div>
+        <button id="btn-pause" class="btn btn--ghost interlude__pause" type="button">Pause game</button>
       </div>
     </div>
 
     <!-- Out of moves -->
     <div id="overlay-gameover" class="overlay is-hidden">
       <div class="panel">
-        <p class="eyebrow">Out of moves</p>
+        <p class="eyebrow" id="over-reason">Out of moves</p>
         <p class="bigscore bigscore--fail">Stage <span id="over-stage">1</span></p>
         <p class="lede" id="over-detail"></p>
         <div class="row">

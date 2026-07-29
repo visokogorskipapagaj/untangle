@@ -1,4 +1,4 @@
-import { COMBO, PX_PER_CM, SCORING } from './config.js';
+import { COMBO, SCORING } from './config.js';
 import { clamp } from './geometry.js';
 
 /**
@@ -282,14 +282,6 @@ export function comboWindow(chain) {
   // tightening forever would have put one back in by the side door.
   const rungs = Math.max(0, Math.min(chain, COMBO.DECAY_FLOOR_RUNG) - 1);
   return Math.max(COMBO.WINDOW_MIN_MS, COMBO.WINDOW_MS * COMBO.WINDOW_DECAY ** rungs);
-}
-
-/** Summed node travel in CSS px, rendered as real-world distance. */
-export function formatDistance(px) {
-  const cm = px / PX_PER_CM;
-  if (cm < 100) return `${cm.toFixed(0)} cm`;
-  if (cm < 100000) return `${(cm / 100).toFixed(2)} m`;
-  return `${(cm / 100000).toFixed(2)} km`;
 }
 
 export function formatScore(value) {

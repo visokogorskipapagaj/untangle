@@ -43,8 +43,8 @@ const progress = loadProgress();
 
 const hud = new Hud({
   onStart: () => game.start(1),
-  onNext: () => game.nextStage(),
-  onRetry: () => game.retryStage(),
+  onRipAndTear: () => game.ripAndTear(),
+  onPause: () => game.togglePause(),
   onGameOverRetry: () => game.retryAfterGameOver(),
   onRestart: () => game.restart(),
   onOptions: (options) => game.setOptions(options),

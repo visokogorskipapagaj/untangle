@@ -1,5 +1,6 @@
-import { MOVES } from './config.js';
-import { formatDistance, formatScore } from './scoring.js';
+import { CLOCK, MOVES } from './config.js';
+import { formatClock } from './deadline.js';
+import { formatScore } from './scoring.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -18,6 +19,8 @@ export class Hud {
       movesLeft: $('stat-moves'),
       movesBox: document.querySelector('.stat--moves'),
       movesDelta: $('stat-moves-delta'),
+      time: $('stat-time'),
+      timeBox: document.querySelector('.stat--time'),
       chainBar: $('chain-bar'),
       chainFill: $('chain-bar-fill'),
       // The whole playfield container. Deliberately NOT named `stage` — `setStats`
@@ -27,30 +30,26 @@ export class Hud {
       bank: $('stat-bank'),
       bankBox: document.querySelector('.stat--bank'),
       bankDelta: $('stat-bank-delta'),
-      distance: $('stat-distance'),
       score: $('stat-score'),
 
       title: $('overlay-title'),
       titleBest: $('title-best'),
-      solved: $('overlay-solved'),
       gameover: $('overlay-gameover'),
       settings: $('overlay-settings'),
 
-      solvedStage: $('solved-stage'),
-      solvedScore: $('solved-score'),
-      solvedCombo: $('solved-combo'),
-      solvedPerMove: $('solved-permove'),
-      solvedUntangles: $('solved-untangles'),
-      solvedMoves: $('solved-moves'),
-      solvedCarried: $('solved-carried'),
-      solvedBank: $('solved-bank'),
-      solvedDistance: $('solved-distance'),
-      solvedTightness: $('solved-tightness'),
-      solvedEfficiency: $('solved-efficiency'),
-      solvedBest: $('solved-best'),
-      solvedTotal: $('solved-total'),
+      interlude: $('overlay-interlude'),
+      cardCleared: $('card-cleared'),
+      cardCountdown: $('card-countdown'),
+      clearedStage: $('cleared-stage'),
+      clearedScore: $('cleared-score'),
+      clearedTotal: $('cleared-total'),
+      countdownStage: $('countdown-stage'),
+      countdownValue: $('countdown-value'),
+      countdownTaunt: $('countdown-taunt'),
+      pause: $('btn-pause'),
 
       overStage: $('over-stage'),
+      overReason: $('over-reason'),
       overDetail: $('over-detail'),
 
       optDistinct: $('opt-distinct'),
@@ -58,8 +57,8 @@ export class Hud {
     };
 
     $('btn-start').addEventListener('click', () => handlers.onStart());
-    $('btn-next').addEventListener('click', () => handlers.onNext());
-    $('btn-retry').addEventListener('click', () => handlers.onRetry());
+    $('btn-riptear').addEventListener('click', () => handlers.onRipAndTear());
+    $('btn-pause').addEventListener('click', () => handlers.onPause());
     $('btn-over-retry').addEventListener('click', () => handlers.onGameOverRetry());
     $('btn-restart').addEventListener('click', () => handlers.onRestart());
     // Same gated handler as the hotkey, for the same reason: rerolling the stage costs the
@@ -102,7 +101,7 @@ export class Hud {
     movesLeft,
     bank,
     drawingFromBank,
-    distancePx,
+    timeLeft,
     score,
     chain,
     chainFraction,
@@ -112,10 +111,11 @@ export class Hud {
 
     const next = {
       stage: String(stage),
+      // Infinity formats as the infinity sign, which is how an untimed stage reads.
+      time: formatClock(timeLeft),
       knots: String(knots),
       movesLeft: String(movesLeft),
       bank: String(bank),
-      distance: formatDistance(distancePx),
       score: formatScore(score),
     };
 
@@ -131,6 +131,22 @@ export class Hud {
     if (this.last.clear !== clear) {
       this.el.knotsBox.classList.toggle('is-clear', clear);
       this.last.clear = clear;
+    }
+
+    // Three states, and only one class changes at a time — same write-what-changed rule
+    // as everything else here, which also stops the critical pulse restarting each frame.
+    const timeLevel = !Number.isFinite(timeLeft)
+      ? 'untimed'
+      : timeLeft <= CLOCK.CRITICAL_MS
+        ? 'critical'
+        : timeLeft <= CLOCK.WARN_MS
+          ? 'low'
+          : '';
+    if (this.last.timeLevel !== timeLevel) {
+      this.el.timeBox.classList.toggle('is-untimed', timeLevel === 'untimed');
+      this.el.timeBox.classList.toggle('is-low', timeLevel === 'low');
+      this.el.timeBox.classList.toggle('is-critical', timeLevel === 'critical');
+      this.last.timeLevel = timeLevel;
     }
 
     const level = movesLeft === 0 ? 'empty' : movesLeft <= MOVES.LOW_WARNING ? 'low' : '';
@@ -250,36 +266,90 @@ export class Hud {
     this.el.title.classList.add('is-hidden');
   }
 
-  showSolved(s) {
-    this.el.solvedStage.textContent = String(s.stage);
-    this.el.solvedScore.textContent = formatScore(s.score);
-    this.el.solvedUntangles.textContent = String(s.untangles);
-    this.el.solvedMoves.textContent = `${s.used} / ${s.ideal + s.bonus}`;
-    this.el.solvedCarried.textContent = s.carried >= 0 ? `+${s.carried}` : String(s.carried);
-    this.el.solvedBank.textContent = String(s.bank);
-    this.el.solvedCombo.textContent =
-      s.bestCursed > 1
-        ? `×${s.bestCombo} → cursed ×${s.bestCursed}`
-        : s.bestCombo > 1
-          ? `×${s.bestCombo}`
-          : '—';
-    this.el.solvedPerMove.textContent = formatScore(s.perMove);
-    this.el.solvedDistance.textContent = formatDistance(s.distancePx);
-    this.el.solvedTightness.textContent = `×${s.avgTightness.toFixed(2)}`;
-    this.el.solvedEfficiency.textContent = `${Math.round(s.avgEfficiency * 100)}%`;
-    this.el.solvedBest.textContent = s.best ? formatScore(s.best) : '—';
-    this.el.solvedTotal.textContent = formatScore(s.total);
-    this.el.solved.classList.remove('is-hidden');
+  /**
+   * The card that says you cleared it, and what it paid. Holds, then gets swiped off by
+   * showCountdown.
+   */
+  showCleared({ stage, score, total }) {
+    this.el.clearedStage.textContent = String(stage);
+    this.el.clearedScore.textContent = formatScore(score);
+    this.el.clearedTotal.textContent = formatScore(total);
+    this.el.interlude.classList.remove('is-hidden');
+    this.#showCard(this.el.cardCleared);
+    this.#hideCard(this.el.cardCountdown);
   }
 
-  hideSolved() {
-    this.el.solved.classList.add('is-hidden');
+  /**
+   * The countdown card.
+   *
+   * If the cleared card is up this is a swap, and the two animate as a pair — one out to
+   * the left, one in from the right. Coming from the title or a retry there is nothing to
+   * replace, so it simply arrives.
+   */
+  showCountdown(stage, taunt = false) {
+    this.el.countdownStage.textContent = String(stage);
+    this.el.countdownTaunt.classList.toggle('is-hidden', !taunt);
+    this.el.interlude.classList.remove('is-hidden');
+
+    const swapping = !this.el.cardCleared.classList.contains('is-hidden');
+    if (swapping) {
+      this.el.cardCleared.classList.remove('is-entering');
+      this.el.cardCleared.classList.add('is-leaving');
+    }
+    this.#showCard(this.el.cardCountdown, swapping);
   }
 
-  showGameOver({ stage, knots }) {
+  /** The number itself, or GO. Written every frame while the count runs. */
+  setCountdown(text) {
+    if (this.last.countdown === text) return;
+    this.el.countdownValue.textContent = text;
+    // GO is the payoff, and it wants to land rather than merely appear.
+    this.el.countdownValue.classList.toggle('is-go', text === 'GO');
+    this.last.countdown = text;
+  }
+
+  setPaused(paused) {
+    if (this.last.paused === paused) return;
+    this.el.pause.textContent = paused ? 'Resume game' : 'Pause game';
+    this.el.interlude.classList.toggle('is-paused', paused);
+    this.last.paused = paused;
+  }
+
+  hideInterlude() {
+    this.el.interlude.classList.add('is-hidden');
+    this.#hideCard(this.el.cardCleared);
+    this.#hideCard(this.el.cardCountdown);
+  }
+
+  /**
+   * Restarting a CSS animation needs the class dropped and the style flushed; without the
+   * reflow read the browser coalesces both writes and the card arrives already in place.
+   */
+  #showCard(card, entering = false) {
+    card.classList.remove('is-hidden', 'is-leaving', 'is-entering');
+    if (!entering) return;
+    void card.offsetWidth;
+    card.classList.add('is-entering');
+  }
+
+  #hideCard(card) {
+    card.classList.add('is-hidden');
+    card.classList.remove('is-leaving', 'is-entering');
+  }
+
+  /**
+   * Two ways to lose, and the panel has to say which — the moves counter and the clock sit
+   * at opposite ends of the HUD, and a player who has just had the board taken away from
+   * them should not have to work out which of the two ran out.
+   */
+  showGameOver({ stage, knots, reason = 'moves' }) {
+    const remaining = `${knots} knot${knots === 1 ? '' : 's'} remaining`;
     this.el.overStage.textContent = String(stage);
+    this.el.overReason.textContent = reason === 'time' ? 'Out of time' : 'Out of moves';
     this.el.overDetail.textContent =
-      `Uh-oh, you ran out of moves with ${knots} knot${knots === 1 ? '' : 's'} remaining.`;
+      reason === 'time'
+        ? `The clock beat you to it, with ${remaining}.`
+        : `Uh-oh, you ran out of moves with ${remaining}.`;
     this.el.gameover.classList.remove('is-hidden');
   }
 
@@ -301,7 +371,7 @@ export class Hud {
 
   /** True while anything is covering the board — input and hotkeys must stand down. */
   get anyOverlayOpen() {
-    return [this.el.settings, this.el.solved, this.el.gameover, this.el.title].some(
+    return [this.el.settings, this.el.interlude, this.el.gameover, this.el.title].some(
       (el) => !el.classList.contains('is-hidden'),
     );
   }
