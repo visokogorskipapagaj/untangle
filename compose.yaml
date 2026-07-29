@@ -1,0 +1,34 @@
+services:
+  untangle:
+    build: .
+    restart: unless-stopped
+
+    environment:
+      # nginx is the only thing that reaches this, so the player's address arrives in a
+      # header rather than on the socket. Without it every player shares one rate-limit
+      # bucket — the proxy's — and one busy client locks the rest out.
+      #
+      # Only ever set behind a proxy that really does set X-Forwarded-For. On a directly
+      # exposed server it lets anyone forge the header and walk around the limit.
+      UNTANGLE_TRUST_PROXY: "1"
+
+    volumes:
+      # Named rather than a bind mount: a fresh named volume inherits the image's
+      # ownership, so the unprivileged `node` user can write to it. A host bind mount
+      # arrives owned by the host and has to be chowned to uid 1000 first.
+      #
+      # This is the one piece of state. Without it the pool lasts exactly as long as the
+      # container, and every redeploy silently resets everyone's stage times.
+      - untangle-pool:/data
+
+    # Published to loopback only, so nginx on the host can reach it and nothing else on
+    # the network can. Dropping the 127.0.0.1 would put the API on every interface.
+    #
+    # If nginx is itself a container, delete this block, put both services on a shared
+    # network, and proxy to http://untangle:8000 instead — then the port is never
+    # published to the host at all.
+    ports:
+      - "127.0.0.1:8000:8000"
+
+volumes:
+  untangle-pool:

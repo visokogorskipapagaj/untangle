@@ -25,6 +25,55 @@ The game still works as plain static files with no server at all — it falls ba
 clear times on the device, which is also what happens whenever the API is unreachable.
 `?pool=0` forces that path.
 
+## Deploy
+
+```bash
+docker compose up -d --build
+```
+
+One container, no dependencies to install and nothing to build. The pool is the only
+state: it lives in the `untangle-pool` volume, and losing that resets everyone's stage
+times. Nothing else needs backing up.
+
+Behind an existing nginx, as a **subdomain** — nothing in the app needs changing:
+
+```nginx
+server {
+    server_name untangle.example.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        # UNTANGLE_TRUST_PROXY=1 reads the first entry of this. Without it every player
+        # shares one rate-limit bucket, because every request arrives from the proxy.
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Under a **subpath** the client needs telling, because the page's assets are relative but
+its API calls are not — `POOL.BASE_URL` is `''`, so it asks for `/api/pars` at the domain
+root and gets somebody else's 404. Set `POOL.BASE_URL` in `src/config.js` to the same
+prefix:
+
+```nginx
+location /untangle/ {
+    proxy_pass http://127.0.0.1:8000/;   # the trailing slash strips the prefix
+    # ...same proxy_set_header lines as above
+}
+```
+
+```js
+// src/config.js
+BASE_URL: '/untangle',
+```
+
+Caddy would do the same job with less TLS configuration, but it is not worth swapping a
+working nginx for: both want :80 and :443, so adding one means either migrating every
+other service or chaining the two, and this is one `location` block either way.
+
 ## Test
 
 ```bash

@@ -1,0 +1,12 @@
+.git
+.gitignore
+node_modules
+test
+README.md
+Dockerfile
+.dockerignore
+compose.yaml
+
+# Never bake a pool into an image. It would ship one machine's playerbase to every
+# deployment and become everybody's starting par — the same reason it is gitignored.
+server/data
