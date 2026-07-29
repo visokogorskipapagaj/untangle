@@ -220,23 +220,67 @@ released with a tenth of a second to spare has landed, and the unscored settle r
 past zero cannot take that back. Hold a rope past the buzzer and it is judged late — a
 stage cannot be won by standing still until the answer arrives.
 
-**A stage does not end in a scoreboard.** It ends in a card carrying the two numbers worth
-carrying — what the stage paid, big, and the run total under it, small — which holds for
-three seconds, swipes off to the left, and reveals the next stage already counting itself
-in: `3.00` down to `0.00`, then `GO`, then the board is yours. Every route into a stage
-runs through that countdown, retries included, so the board is always visible and never
-touchable before the count ends. The run keeps moving by default and **Pause game**, below
-the card, is the only thing that stops it; the stage clock does not start until GO does, so
-nothing in the sequence is charged to the player.
+**The endgame is said by the board, not only by the readout.** Inside the last fifth of the
+deadline the background starts going red, and inside the last twentieth the board itself
+shakes, ±5px, ramping the whole way. Both are fractions of the deadline rather than counts
+of seconds, because nearly out of forty seconds and nearly out of three minutes are the
+same feeling and different numbers — and because an untimed stage pins its fraction at 1,
+so neither ever fires on a board nobody has cleared.
+
+The wash is a second radial gradient laid straight over the one that was already there, and
+it runs the *other* way: weakest over the middle where the ropes are, strongest at the
+edges, so the colour closes in from the frame instead of settling on the puzzle. It caps at
+25% and breathes, faster the further gone the clock is — a tint held at a fixed value reads
+as a filter somebody left on, the same tint moving reads as an alarm. The player is still
+expected to clear this stage, and they cannot clear what they cannot see.
+
+The shake moves the drawing, not the model, so a rope ends up as much as 5px from where the
+pointer thinks it is — well inside the 22px grab radius, and being slightly harder to grab
+in the last four seconds is the effect rather than a cost of it. It shakes the canvas and
+not the HUD, which is carrying the clock the player needs to read while it happens, and it
+stands down entirely under `prefers-reduced-motion` — the wash carries the same news in a
+form nobody has to brace for. Both alarms stop the instant the stage does, so a game-over
+panel never comes up over a board still shaking itself apart.
+
+**A stage does not end in a scoreboard, and the next one does not begin with a countdown.**
+It ends in a card carrying the two numbers worth carrying — what the stage paid, big, and
+the run total under it, small — which holds for three seconds and then hands over the next
+board, already built behind it. There used to be a count on the way in as well: a second
+card, a swipe between them, and `GO`. It was a wait in front of a board you could already
+see, three times a minute, and the one thing it protected against — a clock starting before
+anyone was looking — is a thing the clock does not do anyway, because it does not tick
+behind a panel.
+
+**The hold is not a number.** It is the card itself: a wash of 10% white behind the text
+whose level falls from the top edge of the panel to the bottom across the three seconds, so
+the wait says how much of itself is left. **Play stage** and **Pause**, both inside the
+panel under the text, are the two ways to argue with it, and `Enter` is the first of them
+from the keyboard. Held, the wash steps back and the pause button takes a yellow stroke
+that breathes, because a stopped level and a slow one look the same.
 
 Everything else a breakdown used to list — per-move, tightness, efficiency, carried moves —
 is still tracked and still feeds the score; it is simply not worth a stop between every
 stage, and `?debug=1` has it live. Best per stage and the clear time the clock learns from
 are still banked on every clear.
 
+**Briefings** are the one thing that still opens a stage with a panel, and there are two of
+them. A mechanic that can end a run without ever having been named gets one modal, on the
+stage it arrives, and never again: the clock on stage 1, and the cursed rope on stage 16 —
+`CURSED.FROM`, derived rather than typed, so the panel cannot drift off the stage it is
+about. They are keyed to the stage the thing *appears on* rather than the one before it, so
+the black rope is on the board behind the panel while you read about it.
+
+The clock briefing has two answers and picks between them at open time, because a stage
+nobody in the pool has ever cleared genuinely has no deadline to quote and a panel that
+announces one would be lying. Seen briefings are remembered in `progress.briefed`; **Back
+to stage 1** in settings is what puts them back, which makes it the only way to read one
+twice.
+
 **Rip & Tear**, on the title screen, skips straight to stage 30 — par, where the margin
-reaches zero — with the run's usual cushion and nothing else. Its countdown has something
-to say about the decision.
+reaches zero — with the run's usual cushion and nothing else. It gets a panel of its own on
+the way in, which has something to say about the decision. That one is not remembered and
+not an explanation: it belongs to the button rather than to the stage it drops you on, so
+it shows up every single time.
 
 **Heavy ropes** are drawn thicker and cost 2 (or later, 3) moves to drag. Doubles start
 at stage 4, a triple becomes possible from stage 9, and they never exceed 40% of a stage.

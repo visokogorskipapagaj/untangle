@@ -105,24 +105,43 @@ test('every button the HUD binds exists, and every overlay it toggles exists', (
     assert.ok(htmlIds.has(id), `hud.js binds #${id}, which index.html does not define`);
   }
 
-  for (const id of ['overlay-title', 'overlay-interlude', 'overlay-gameover', 'overlay-settings']) {
-    assert.ok(htmlIds.has(id), `${id} must exist`);
-  }
+  const overlays = [
+    'overlay-title',
+    'overlay-interlude',
+    'overlay-briefing',
+    'overlay-gameover',
+    'overlay-settings',
+  ];
+  for (const id of overlays) assert.ok(htmlIds.has(id), `${id} must exist`);
 });
 
-test('the swipe duration is the same number in the script and the stylesheet', () => {
-  // The script decides when the incoming card starts counting; the stylesheet decides how
-  // long it takes to arrive. Change one and the count starts against a card still sliding,
-  // or the card sits finished and waits — neither of which shows up as an error anywhere.
+test('the cursed briefing is keyed off the stage the cursed rope actually arrives', () => {
+  // Two numbers that have to be the same number, and nothing would fail if they drifted:
+  // the briefing would simply open on a stage with no black rope on it, or the black rope
+  // would arrive unannounced. So the map is written in terms of the knob rather than in 16s.
+  const config = readFileSync(join(root, 'src/config.js'), 'utf8');
+  const stages = config.match(/STAGES:\s*\{([^}]*)\}/);
+
+  assert.ok(stages, 'BRIEFING.STAGES should be declared in config.js');
+  assert.match(stages[1], /\[CURSED\.FROM\]:\s*'cursed'/, 'derived, not typed out');
+  assert.ok(!/\b16\]?:\s*'cursed'/.test(stages[1]), 'and not a literal beside it');
+});
+
+test('nothing is left of the count that used to open every stage', () => {
+  // It came out in one piece — the second card, the swipe between them, GO, and the phase
+  // machine that drove all three. A leftover knob reads as a thing that still runs.
   const config = readFileSync(join(root, 'src/config.js'), 'utf8');
   const css = readFileSync(join(root, 'styles.css'), 'utf8');
+  const game = readFileSync(join(root, 'src/game.js'), 'utf8');
 
-  const declared = config.match(/SWIPE_MS:\s*(\d+)/);
-  assert.ok(declared, 'INTERLUDE.SWIPE_MS should be declared in config.js');
-
-  const animated = [...css.matchAll(/\.panel--interlude\.is-(?:leaving|entering)\s*\{\s*\n\s*animation:[^;]*?(\d+)ms/g)];
-  assert.equal(animated.length, 2, 'both swipe animations should carry an explicit duration');
-  for (const [, ms] of animated) {
-    assert.equal(ms, declared[1], `CSS swipe runs ${ms}ms, config says ${declared[1]}ms`);
+  for (const gone of ['SWIPE_MS', 'COUNTDOWN_MS', 'GO_MS']) {
+    assert.ok(!config.includes(`${gone}:`), `INTERLUDE.${gone} outlived the countdown`);
+  }
+  for (const gone of ['showCountdown', 'setGo']) {
+    assert.ok(!hudSource.includes(`${gone}(`), `Hud.${gone} outlived the countdown`);
+    assert.ok(!game.includes(`.${gone}(`), `game.js still calls ${gone}`);
+  }
+  for (const gone of ['swipe-out-left', 'swipe-in-right', 'interlude__card']) {
+    assert.ok(!css.includes(gone), `the stylesheet still carries ${gone}`);
   }
 });

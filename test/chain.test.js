@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { COMBO, CURSED, STAGE } from '../src/config.js';
+import { CLOCK, COMBO, CURSED, STAGE } from '../src/config.js';
 import { generateStage, stageSpec } from '../src/generator.js';
 import { Renderer } from '../src/render.js';
 import { Rope } from '../src/rope.js';
@@ -343,6 +343,133 @@ test('the renderer survives a board carrying a detonated and a cursed rope', () 
 
   assert.ok(calls.includes('stroke'), 'ropes were drawn');
   assert.ok(calls.includes('arc'), 'markers and shockwaves were drawn');
+});
+
+/**
+ * A recording 2D context, plus the bare board state that draws nothing but the background.
+ * The panic wash and the shake are the only things under test here, so everything that
+ * would also paint or translate — a chain, a banner, markers — is deliberately absent.
+ */
+function recordingRenderer() {
+  const calls = [];
+  const stops = [];
+  const ctx = new Proxy(
+    { setTransform() {}, save() {}, restore() {}, canvas: null },
+    {
+      get: (t, p) => {
+        if (p in t) return t[p];
+        return (...args) => {
+          calls.push([p, ...args]);
+          return { addColorStop: (offset, color) => stops.push([offset, color]) };
+        };
+      },
+      set: () => true,
+    },
+  );
+  const renderer = new Renderer({ getContext: () => ctx, width: 0, height: 0 });
+  renderer.width = 800;
+  renderer.height = 600;
+  renderer.dpr = 1;
+
+  const draw = (over = {}) => {
+    calls.length = 0;
+    stops.length = 0;
+    renderer.draw({
+      ropes: [],
+      knots: [],
+      flashes: [],
+      chain: 0,
+      grabbedId: -1,
+      showMarkers: false,
+      margin: 20,
+      time: 1234,
+      debug: false,
+      ...over,
+    });
+    return {
+      calls: [...calls],
+      gradients: calls.filter(([name]) => name === 'createRadialGradient').length,
+      translates: calls.filter(([name]) => name === 'translate'),
+      alphas: stops.map(([, color]) => Number(String(color).match(/([\d.]+)\)$/)?.[1] ?? 0)),
+      stops,
+    };
+  };
+  return { renderer, draw };
+}
+
+test('a calm board draws the one background gradient it always had', () => {
+  const { draw } = recordingRenderer();
+  const calm = draw({ panic: 0, shake: 0 });
+
+  assert.equal(calm.gradients, 1, 'the panic wash is not painted when there is no panic');
+  assert.deepEqual(calm.translates, [], 'and nothing is shifted');
+});
+
+test('the panic wash is a second radial gradient laid over the first', () => {
+  const { draw } = recordingRenderer();
+  const full = draw({ panic: 1, shake: 0 });
+
+  assert.equal(full.gradients, 2, 'the original survives underneath it');
+  assert.ok(
+    full.stops.slice(-3).every(([, color]) => String(color).startsWith('rgba(196')),
+    'and the one on top is red the whole way across',
+  );
+});
+
+test('the wash runs the other way: weakest over the board, strongest at the edges', () => {
+  // The gradient underneath is brightest in the middle because that is where the ropes are.
+  // If this one matched it, the alarm would be painting over the thing it is warning about.
+  const { draw } = recordingRenderer();
+  const [core, knee, edge] = draw({ panic: 1, shake: 0 }).stops.slice(-3);
+
+  assert.ok(Number(core[0]) < Number(knee[0]) && Number(knee[0]) < Number(edge[0]));
+  const alpha = (stop) => Number(String(stop[1]).match(/([\d.]+)\)$/)[1]);
+  assert.ok(alpha(core) < alpha(knee), 'it climbs outward');
+  assert.ok(alpha(knee) < alpha(edge), 'all the way to the frame');
+});
+
+test('the wash never gets redder than the cap, however far gone the clock is', () => {
+  // The player is still expected to clear this stage, and they cannot clear what they
+  // cannot see. Whatever the pulse is doing on any given frame, this is the ceiling.
+  const { draw } = recordingRenderer();
+
+  for (const time of [0, 400, 900, 1500, 2600, 5000]) {
+    for (const alpha of draw({ panic: 1, shake: 0, time }).alphas) {
+      assert.ok(alpha <= CLOCK.PANIC_ALPHA + 1e-9, `alpha ${alpha} over the cap at t=${time}`);
+    }
+  }
+});
+
+test('the shake moves the board and stays inside its stated envelope', () => {
+  const { draw } = recordingRenderer();
+
+  assert.deepEqual(draw({ panic: 1, shake: 0 }).translates, [], 'nothing until it opens');
+
+  let moved = false;
+  for (let time = 0; time < 4000; time += 37) {
+    const [shift] = draw({ panic: 1, shake: 1, time }).translates;
+    assert.ok(shift, 'a shaking board is translated');
+    const [, dx, dy] = shift;
+    assert.ok(Math.abs(dx) <= CLOCK.SHAKE_PX + 1e-9, `dx ${dx} outside ±${CLOCK.SHAKE_PX}`);
+    assert.ok(Math.abs(dy) <= CLOCK.SHAKE_PX + 1e-9, `dy ${dy} outside ±${CLOCK.SHAKE_PX}`);
+    if (Math.abs(dx) > 1 || Math.abs(dy) > 1) moved = true;
+  }
+  assert.ok(moved, 'and it really travels rather than jittering below a pixel');
+});
+
+test('the background is painted before the shake, so no bare strip comes into frame', () => {
+  // It is a full-bleed fill, the panic wash on top of it included. Shifted along with
+  // everything else it drags its own edge into view and leaves an unpainted band down one
+  // side of the board — on the exact frames the player can least afford to be confused by.
+  const { draw } = recordingRenderer();
+  const { calls, translates } = draw({ panic: 1, shake: 1, time: 900 });
+
+  assert.ok(translates.length >= 1, 'sanity: it did shake');
+  const names = calls.map(([name]) => name);
+  assert.ok(
+    names.lastIndexOf('fillRect') < names.indexOf('translate'),
+    'every full-bleed fill lands before the board is shifted under it',
+  );
 });
 
 test('the chain window opens at WINDOW_MS and tightens every rung', () => {

@@ -81,58 +81,127 @@
     </div>
 
     <!--
-      Between stages. Two cards share one grid cell so the outgoing one can slide left
-      while the incoming one slides in from the right; the pause button sits below both
-      and deliberately outside the stack, so it holds still while they move.
+      Between stages. The one card the run still stops for, and it is a summary rather than
+      a wait: what the stage paid, what the run is worth, and the two ways to argue with the
+      three seconds it holds for.
+
+      Those three seconds are the bar — a tint draining from the top of the panel to the
+      bottom. It is first in the panel and absolutely positioned, so it paints behind the
+      text rather than over it.
     -->
     <div id="overlay-interlude" class="overlay overlay--interlude is-hidden">
-      <div class="interlude">
-        <div class="interlude__stack">
-          <div class="panel panel--interlude is-hidden" id="card-cleared">
-            <p class="eyebrow">Stage <span id="cleared-stage">1</span></p>
-            <p class="interlude__headline">CLEARED!</p>
-            <p class="interlude__points" id="cleared-score">0</p>
-            <p class="interlude__total">Running you a total of <span id="cleared-total">0</span></p>
-          </div>
-          <div class="panel panel--interlude is-hidden" id="card-countdown">
-            <p class="eyebrow">Stage</p>
-            <p class="interlude__headline" id="countdown-stage">1</p>
-            <p class="interlude__count" id="countdown-value">3.00</p>
-            <p class="interlude__taunt is-hidden" id="countdown-taunt">
-              Oh, stage 30 straight off the bat. Big man. Let's see it then.
-            </p>
+      <div class="panel panel--interlude">
+        <div class="interlude__timer" aria-hidden="true"><i id="interlude-timer"></i></div>
+        <div class="interlude__body">
+          <p class="eyebrow">Stage <span id="cleared-stage">1</span></p>
+          <p class="interlude__headline">CLEARED!</p>
+          <p class="interlude__points" id="cleared-score">0</p>
+          <p class="interlude__total">Running you a total of <span id="cleared-total">0</span></p>
+          <div class="row interlude__actions">
+            <!-- Both icons live in the button and the stylesheet shows one, keyed off
+                 `is-paused` on the overlay — which the HUD already toggles, so pausing needs
+                 no second piece of state. The label is a span of its own because the button's
+                 own textContent is those SVGs: writing to it would delete them. -->
+            <button id="btn-pause" class="btn btn--icon interlude__pause" type="button"
+                    title="Pause">
+              <svg class="icon-pause" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd"
+                    d="M6.4532799999999995 2.933312c0 -0.324 -0.262656 -0.5866666666666667 -0.5866666666666667 -0.5866666666666667 -0.3240106666666666 0 -0.5866666666666667 0.26266666666666666 -0.5866666666666667 0.5866666666666667V13.066666666666666c0 0.3239466666666667 0.262656 0.5866666666666667 0.5866666666666667 0.5866666666666667 0.3240106666666666 0 0.5866666666666667 -0.26272 0.5866666666666667 -0.5866666666666667V2.933312Zm4.266719999999999 0c0 -0.324 -0.26270933333333335 -0.5866666666666667 -0.58672 -0.5866666666666667 -0.3240106666666666 0 -0.5866666666666667 0.26266666666666666 -0.5866666666666667 0.5866666666666667V13.066666666666666c0 0.3239466666666667 0.262656 0.5866666666666667 0.5866666666666667 0.5866666666666667 0.3240106666666666 0 0.58672 -0.26272 0.58672 -0.5866666666666667V2.933312Z"/>
+              </svg>
+              <svg class="icon-play" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd"
+                    d="M3.4579413333333333 2.4765973333333333c0.16008533333333333 -0.09652266666666667 0.35901866666666665 -0.10218666666666666 0.5243306666666666 -0.014933333333333333l9.600021333333332 5.066666666666666c0.17493333333333333 0.09232 0.2843733333333333 0.2738773333333333 0.2843733333333333 0.47166933333333333 0 0.19779200000000002 -0.10944 0.3793493333333333 -0.2843733333333333 0.47166933333333333L3.982272 13.538346666666666c-0.16531200000000001 0.08725333333333334 -0.3642453333333333 0.08159999999999999 -0.5243306666666666 -0.014933333333333333C3.2978666666666667 13.426879999999999 3.2 13.253546666666667 3.2 13.066666666666666v-10.133333333333333c0 -0.18692266666666668 0.09786666666666666 -0.36021333333333333 0.25794133333333336 -0.45673600000000003ZM4.266666666666667 3.8178666666666667v8.364213333333334L12.19072 8 4.266666666666667 3.8178666666666667Z"/>
+              </svg>
+              <span id="pause-label">Pause</span>
+            </button>
+            <!-- The green one, because it is what the player is here to do: the card is a
+                 wait, and this is the way out of it. Pressing it builds the next board
+                 rather than jumping over it, so it is never present but inert. -->
+            <button id="btn-skip" class="btn btn--primary btn--icon" type="button"
+                    aria-label="Play stage" title="Play stage (Enter)">
+              <!-- Radix "Double Arrow Right", verbatim. evenodd is load-bearing: the two
+                   chevrons are subpaths of one path, and the default nonzero rule would
+                   fill the notch between the strokes instead of leaving it open. -->
+              <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd"
+                    d="M2.289546666666667 11.889493333333332c-0.208288 0.20832 -0.208288 0.5460266666666667 0 0.7543466666666667 0.20827733333333331 0.20821333333333333 0.5459626666666666 0.20821333333333333 0.7542399999999999 0l4.266666666666667 -4.266719999999999c0.208288 -0.20827733333333331 0.208288 -0.5459626666666666 0 -0.7542399999999999l-4.266666666666667 -4.266666666666667c-0.20827733333333331 -0.208288 -0.5459626666666666 -0.208288 -0.7542399999999999 0 -0.208288 0.20827733333333331 -0.208288 0.5459626666666666 0 0.7542399999999999L6.179082666666666 8l-3.889536 3.8894933333333332Zm6.4 0c-0.208288 0.20832 -0.208288 0.5460266666666667 0 0.7543466666666667 0.20827733333333331 0.20821333333333333 0.5459626666666666 0.20821333333333333 0.7542399999999999 0l4.266719999999999 -4.266719999999999c0.20821333333333333 -0.20827733333333331 0.20821333333333333 -0.5459626666666666 0 -0.7542399999999999l-4.266719999999999 -4.266666666666667c-0.20827733333333331 -0.208288 -0.5459626666666666 -0.208288 -0.7542399999999999 0 -0.208288 0.20827733333333331 -0.208288 0.5459626666666666 0 0.7542399999999999L12.579093333333333 8l-3.889546666666667 3.8894933333333332Z"/>
+              </svg>
+              <span>Play stage</span>
+            </button>
           </div>
         </div>
-        <div class="interlude__actions">
-          <!-- Both icons live in the button and the stylesheet shows one, keyed off
-               `is-paused` on the overlay — which the HUD already toggles, so pausing needs
-               no second piece of state. The label is a span of its own because the button's
-               own textContent is those SVGs: writing to it would delete them. -->
-          <button id="btn-pause" class="btn btn--ghost btn--icon interlude__pause" type="button"
-                  title="Pause game">
-            <svg class="icon-pause" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-              <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd"
-                    d="M6.4532799999999995 2.933312c0 -0.324 -0.262656 -0.5866666666666667 -0.5866666666666667 -0.5866666666666667 -0.3240106666666666 0 -0.5866666666666667 0.26266666666666666 -0.5866666666666667 0.5866666666666667V13.066666666666666c0 0.3239466666666667 0.262656 0.5866666666666667 0.5866666666666667 0.5866666666666667 0.3240106666666666 0 0.5866666666666667 -0.26272 0.5866666666666667 -0.5866666666666667V2.933312Zm4.266719999999999 0c0 -0.324 -0.26270933333333335 -0.5866666666666667 -0.58672 -0.5866666666666667 -0.3240106666666666 0 -0.5866666666666667 0.26266666666666666 -0.5866666666666667 0.5866666666666667V13.066666666666666c0 0.3239466666666667 0.262656 0.5866666666666667 0.5866666666666667 0.5866666666666667 0.3240106666666666 0 0.58672 -0.26272 0.58672 -0.5866666666666667V2.933312Z"/>
-            </svg>
-            <svg class="icon-play" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-              <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd"
-                    d="M3.4579413333333333 2.4765973333333333c0.16008533333333333 -0.09652266666666667 0.35901866666666665 -0.10218666666666666 0.5243306666666666 -0.014933333333333333l9.600021333333332 5.066666666666666c0.17493333333333333 0.09232 0.2843733333333333 0.2738773333333333 0.2843733333333333 0.47166933333333333 0 0.19779200000000002 -0.10944 0.3793493333333333 -0.2843733333333333 0.47166933333333333L3.982272 13.538346666666666c-0.16531200000000001 0.08725333333333334 -0.3642453333333333 0.08159999999999999 -0.5243306666666666 -0.014933333333333333C3.2978666666666667 13.426879999999999 3.2 13.253546666666667 3.2 13.066666666666666v-10.133333333333333c0 -0.18692266666666668 0.09786666666666666 -0.36021333333333333 0.25794133333333336 -0.45673600000000003ZM4.266666666666667 3.8178666666666667v8.364213333333334L12.19072 8 4.266666666666667 3.8178666666666667Z"/>
-            </svg>
-            <span id="pause-label">Pause game</span>
-          </button>
-          <!-- Live for the whole sequence, CLEARED card included — skipping that card
-               builds the next board rather than jumping over it, so there is no phase left
-               where the button would be present but inert. -->
-          <button id="btn-skip" class="btn btn--ghost btn--icon interlude__skip" type="button"
-                  aria-label="Skip ahead to the next stage" title="Skip (Enter)">
-            <!-- Radix "Double Arrow Right", verbatim. evenodd is load-bearing: the two
-                 chevrons are subpaths of one path, and the default nonzero rule would
-                 fill the notch between the strokes instead of leaving it open. -->
+      </div>
+    </div>
+
+    <!--
+      Briefings. One panel, one card per mechanic, opened on the stage that mechanic arrives
+      and then not again — src/config.js (BRIEFING) owns which stage opens which card.
+
+      The prose lives here rather than in the script because it is prose. The script picks
+      the card and fills the two things that are not knowable until the stage has loaded:
+      the number on the clock, and whether there is one at all.
+    -->
+    <div id="overlay-briefing" class="overlay is-hidden">
+      <div class="panel panel--brief">
+        <p class="eyebrow">Stage <span id="brief-stage">1</span></p>
+
+        <div class="brief is-hidden" id="brief-clock">
+          <p class="brief__title">THE CLOCK</p>
+          <p>Every stage has a clock on it, and it starts the moment this panel closes. No
+            lead-in, no three, two, one — the readout in the corner is live from the second
+            you can touch a rope, and it does not stop while you think about it.</p>
+          <!-- Which of these two is up is the honest answer to "how long have I got", and
+               the game genuinely does not know until the stage loads: a board nobody in the
+               pool has ever cleared has no deadline to quote. Each carries its own last
+               line, because the fail condition only exists on one of them. -->
+          <p id="brief-clock-timed">This one gives you
+            <span class="num" id="brief-clock-limit">∞</span>. Nobody made that number up —
+            it's how long the stage actually takes people, and once you've cleared it a few
+            times it's how long it takes <strong>you</strong>. Run it down with knots still
+            on the board and that's the stage.</p>
+          <p id="brief-clock-untimed">Except this one. Nobody has ever cleared it, so there's
+            nothing to measure you against and the corner reads <span class="num">∞</span>.
+            Take as long as you like — what you do with it now is the number you'll be racing
+            next time.</p>
+        </div>
+
+        <div class="brief is-hidden" id="brief-cursed">
+          <p class="brief__title">CURSED ROPES</p>
+          <p>That black one with the pulse in it is not a rope you move. Grabbing it costs
+            ten, and anything still crossing it costs double to drag. Work the board
+            <strong>around</strong> it and it gets cheaper as you clear ropes off it.</p>
+          <p>It is also the biggest multiplier in the game. Pull a rope <strong>out of</strong>
+            its field while a combo is already running and the run goes cursed: everything the
+            combo has banked gets multiplied, and the multiplier climbs with every further
+            rope you haul off the black one.</p>
+          <p>So it is a two-part move, and that is the whole trick. Build an ordinary combo on
+            the clean ropes first — a cursed combo cannot be started cold, because with no run
+            going there is nothing to multiply — then turn it onto the black rope while the
+            window is still open. Take it to <span class="num">×10</span> and the rope
+            detonates for free.</p>
+          <p class="brief__warn">The window burns nearly twice as fast while it's cursed, and
+            parking a rope back on the black one is a fresh knot — which kills the run and the
+            multiplier with it.</p>
+        </div>
+
+        <div class="brief is-hidden" id="brief-riptear">
+          <p class="brief__title">RIP &amp; TEAR</p>
+          <p class="brief__warn">Oh, stage 30 straight off the bat. Big man. Let's see it
+            then.</p>
+          <p>Par, where the margin the clock gives you reaches exactly zero. Heavy ropes,
+            several cursed ones, and the run's usual three banked moves. Nothing else.</p>
+        </div>
+
+        <div class="row brief__actions">
+          <button id="btn-brief-play" class="btn btn--primary btn--icon" type="button"
+                  aria-label="Play stage" title="Play stage (Enter)">
+            <!-- The same double-arrow as the CLEARED card's, and for the same reason: this
+                 is the same door out of the same kind of wait. -->
             <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
               <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd"
-                    d="M2.289546666666667 11.889493333333332c-0.208288 0.20832 -0.208288 0.5460266666666667 0 0.7543466666666667 0.20827733333333331 0.20821333333333333 0.5459626666666666 0.20821333333333333 0.7542399999999999 0l4.266666666666667 -4.266719999999999c0.208288 -0.20827733333333331 0.208288 -0.5459626666666666 0 -0.7542399999999999l-4.266666666666667 -4.266666666666667c-0.20827733333333331 -0.208288 -0.5459626666666666 -0.208288 -0.7542399999999999 0 -0.208288 0.20827733333333331 -0.208288 0.5459626666666666 0 0.7542399999999999L6.179082666666666 8l-3.889536 3.8894933333333332Zm6.4 0c-0.208288 0.20832 -0.208288 0.5460266666666667 0 0.7543466666666667 0.20827733333333331 0.20821333333333333 0.5459626666666666 0.20821333333333333 0.7542399999999999 0l4.266719999999999 -4.266719999999999c0.20821333333333333 -0.20827733333333331 0.20821333333333333 -0.5459626666666666 0 -0.7542399999999999l-4.266719999999999 -4.266666666666667c-0.20827733333333331 -0.208288 -0.5459626666666666 -0.208288 -0.7542399999999999 0 -0.208288 0.20827733333333331 -0.208288 0.5459626666666666 0 0.7542399999999999L12.579093333333333 8l-3.889546666666667 3.8894933333333332Z"/>
+                  d="M2.289546666666667 11.889493333333332c-0.208288 0.20832 -0.208288 0.5460266666666667 0 0.7543466666666667 0.20827733333333331 0.20821333333333333 0.5459626666666666 0.20821333333333333 0.7542399999999999 0l4.266666666666667 -4.266719999999999c0.208288 -0.20827733333333331 0.208288 -0.5459626666666666 0 -0.7542399999999999l-4.266666666666667 -4.266666666666667c-0.20827733333333331 -0.208288 -0.5459626666666666 -0.208288 -0.7542399999999999 0 -0.208288 0.20827733333333331 -0.208288 0.5459626666666666 0 0.7542399999999999L6.179082666666666 8l-3.889536 3.8894933333333332Zm6.4 0c-0.208288 0.20832 -0.208288 0.5460266666666667 0 0.7543466666666667 0.20827733333333331 0.20821333333333333 0.5459626666666666 0.20821333333333333 0.7542399999999999 0l4.266719999999999 -4.266719999999999c0.20821333333333333 -0.20827733333333331 0.20821333333333333 -0.5459626666666666 0 -0.7542399999999999l-4.266719999999999 -4.266666666666667c-0.20827733333333331 -0.208288 -0.5459626666666666 -0.208288 -0.7542399999999999 0 -0.208288 0.20827733333333331 -0.208288 0.5459626666666666 0 0.7542399999999999L12.579093333333333 8l-3.889546666666667 3.8894933333333332Z"/>
             </svg>
-            <span>Skip</span>
+            <span>Play stage</span>
           </button>
         </div>
       </div>

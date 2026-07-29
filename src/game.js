@@ -1,5 +1,5 @@
 import { ComboRun } from './combo.js';
-import { COMBO, COMBO_TOTAL_Y, CURSED, INTERLUDE, ROPE } from './config.js';
+import { BRIEFING, CLOCK, COMBO, COMBO_TOTAL_Y, CURSED, INTERLUDE, ROPE } from './config.js';
 import {
   expectedTime,
   poolFraction,
@@ -53,6 +53,9 @@ export class Game {
     // player's, so those stages simply run untimed again — but it has to be an object
     // before the first clear is filed into it.
     this.progress.times ||= {};
+    // Which briefings this record has already been shown. Same story as times: absent on
+    // any record written before they existed, and an empty one is exactly a new player's.
+    this.progress.briefed ||= {};
     this.baseSeed = baseSeed;
     this.debug = debug;
     /** Phones play a thinned board — see STAGE.PHONE_SCALE. Fixed for the whole run. */
@@ -85,11 +88,13 @@ export class Game {
     this.stageInfo = null;
 
     /**
-     * The between-stages sequence, or null while a stage is being played. Phases run
-     * cleared -> swipe -> countdown -> go, and the last one hands the board over.
+     * The CLEARED card's hold, or null whenever one is not up. It is the only thing left
+     * between two stages, and when it runs out the next board is built and handed over.
      */
     this.interlude = null;
-    /** Holds the sequence where it stands. Only ever set from the PAUSE button. */
+    /** The briefing on screen, by card name, or null. See BRIEFING in config.js. */
+    this.briefing = null;
+    /** Holds the card where it stands. Only ever set from the PAUSE button. */
     this.paused = false;
   }
 
@@ -110,9 +115,9 @@ export class Game {
   /**
    * Builds a board and leaves it sitting in `intro`, untouchable.
    *
-   * Deliberately does not decide what happens next: the countdown that hands the board
-   * over is the interlude's job, and the solved path needs the board swapped *underneath*
-   * a card that is still sliding. Every route in goes through #enterStage.
+   * Deliberately does not decide what happens next: handing the board over is #enterStage's
+   * job, and the solved path needs the board built *underneath* the card that is still
+   * reporting the last stage. Every route in goes through #enterStage.
    */
   loadStage(stage) {
     this.stage = stage;
@@ -163,10 +168,48 @@ export class Game {
     this.state = 'intro';
   }
 
-  /** Loads a stage and counts the player into it. */
+  /**
+   * Loads a stage and hands it straight over — through a briefing first, on the two stages
+   * that have one to give.
+   *
+   * There is no count into a stage any more. The board is built and it is yours, which is
+   * what makes a briefing legible as an exception rather than as more of the same.
+   */
   #enterStage(stage, taunt = false) {
     this.loadStage(stage);
-    this.#beginCountdown(taunt);
+
+    const key = taunt ? BRIEFING.RIP_AND_TEAR : this.#unseenBriefing(stage);
+    if (!key) {
+      this.#beginPlay();
+      return;
+    }
+
+    // Take the CLEARED card down first: the briefing is a second panel and they would
+    // otherwise stack, the dead one behind the live one.
+    this.#clearInterlude();
+
+    // A card this config names and the markup does not have is nothing to read, so it is
+    // nothing to wait for either — hand the board over rather than freezing it behind a
+    // panel that never opened. The HUD is the only thing that knows, so it says.
+    if (!this.hud.showBriefing(key, { stage, limit: this.clock.limit })) {
+      this.#beginPlay();
+      return;
+    }
+
+    this.briefing = key;
+    // Remembered the moment it goes up rather than when it is dismissed. A briefing
+    // reloaded past has been seen, and the alternative is a panel that reopens every time
+    // somebody refreshes the tab on stage 1.
+    if (key !== BRIEFING.RIP_AND_TEAR) {
+      this.progress.briefed[key] = true;
+      saveProgress(this.progress);
+    }
+  }
+
+  /** The briefing this stage owes the player, or null — for a stage with none, or a seen one. */
+  #unseenBriefing(stage) {
+    const key = BRIEFING.STAGES[stage];
+    return key && !this.progress.briefed[key] ? key : null;
   }
 
   /** Begins a fresh run: banked moves and accumulated score both start over. */
@@ -179,7 +222,7 @@ export class Game {
 
   /**
    * Straight in at the deep end, with the run's cushion and nothing else. The taunt is the
-   * point of the button, so it rides along to the countdown that answers for it.
+   * point of the button, so it rides along to the briefing that answers for it.
    */
   ripAndTear() {
     this.start(INTERLUDE.RIP_AND_TEAR_STAGE, true);
@@ -200,7 +243,7 @@ export class Game {
     this.#enterStage(this.stage);
   }
 
-  /** PAUSE, and the same button again to resume. Only the interlude can be held. */
+  /** PAUSE, and the same button again to resume. Only the CLEARED hold can be held. */
   togglePause() {
     if (!this.interlude) return;
     this.paused = !this.paused;
@@ -211,6 +254,10 @@ export class Game {
     this.progress.total = 0;
     this.progress.maxStage = 1;
     this.progress.best = {};
+    // Unlike the clear times below, the briefings go. "Back to stage 1" is somebody asking
+    // to play the game from the beginning, and the beginning includes being told how it
+    // works — it is also the only way back to a panel that is otherwise shown once ever.
+    this.progress.briefed = {};
     // Clear times deliberately survive. They are a record of how fast this player works,
     // not of how far they got, and starting the ladder again does not make them someone
     // else — wiping them would also make "restart" the way to take the clock off a stage
@@ -539,94 +586,67 @@ export class Game {
 
   // --- between stages --------------------------------------------------------
 
-  /** Opens the countdown card. `taunt` is Rip & Tear's, and nothing else sets it. */
-  #beginCountdown(taunt = false) {
-    this.paused = false;
-    this.interlude = { phase: 'countdown', remaining: INTERLUDE.COUNTDOWN_MS };
-    this.hud.showCountdown(this.stage, taunt);
-    this.hud.setCountdown(countdownText(INTERLUDE.COUNTDOWN_MS));
-    this.hud.setPaused(false);
-  }
-
   /**
-   * Steps the sequence.
+   * Runs the CLEARED card's hold down, and hands over the next stage when it is spent.
    *
-   * The swipe is the one phase PAUSE cannot hold: it is a transition rather than a beat,
-   * the stylesheet is already running it, and freezing the clock underneath a CSS
-   * animation would strand one card halfway across the screen.
+   * The next board is built at the end rather than at the start, so the card is reporting
+   * the stage behind it for the whole of its three seconds and the stage in front of it is
+   * built once, on the way out — by whichever of this and playStage gets there first.
    */
   #updateInterlude(dt) {
-    const stage = this.interlude;
-    if (this.paused && stage.phase !== 'swipe') return;
+    if (this.paused) return;
 
-    stage.remaining -= dt;
-
-    if (stage.remaining > 0) {
-      if (stage.phase === 'countdown') this.hud.setCountdown(countdownText(stage.remaining));
+    this.interlude.remaining -= dt;
+    if (this.interlude.remaining > 0) {
+      this.hud.setCountdown(this.interlude.remaining / this.interlude.total);
       return;
     }
 
-    switch (stage.phase) {
-      case 'cleared':
-        // The next board is built here, underneath a card that is about to slide off it,
-        // so what the countdown counts into is already there behind the panel.
-        this.loadStage(this.stage + 1);
-        stage.phase = 'swipe';
-        stage.remaining = INTERLUDE.SWIPE_MS;
-        this.hud.showCountdown(this.stage, false);
-        this.hud.setCountdown(countdownText(INTERLUDE.COUNTDOWN_MS));
-        break;
+    this.hud.setCountdown(0);
+    this.#enterStage(this.stage + 1);
+  }
 
-      case 'swipe':
-        // Counting only starts once the card has arrived. A number ticking down while it
-        // is still sliding reads as time the player was charged for before they could see.
-        stage.phase = 'countdown';
-        stage.remaining = INTERLUDE.COUNTDOWN_MS;
-        break;
-
-      case 'countdown':
-        stage.phase = 'go';
-        stage.remaining = INTERLUDE.GO_MS;
-        this.hud.setCountdown('GO');
-        break;
-
-      default:
-        this.#beginPlay();
-    }
+  /** Takes down whatever is between the stages. The board behind it is already built. */
+  #clearInterlude() {
+    this.interlude = null;
+    this.paused = false;
+    this.hud.setPaused(false);
+    this.hud.hideInterlude();
   }
 
   /**
    * Hands the board over.
    *
-   * Shared by the countdown running out and by the skip button, so skipping is the same
-   * door rather than a thinner one beside it. `paused` is dropped here rather than at the
-   * two call sites because only one of them can reach this held: the sequence cannot tick
-   * its way to the end while paused, but the skip button is still clickable.
+   * Every route in ends here — a hold that ran out, a briefing dismissed, a stage entered
+   * with neither — so there is no door into a live board that is narrower than the others.
+   * `paused` is dropped rather than assumed clear because the hold can be sitting held when
+   * the green button is pressed.
    */
   #beginPlay() {
-    this.interlude = null;
-    this.paused = false;
-    this.hud.setPaused(false);
-    this.hud.hideInterlude();
+    this.#clearInterlude();
+    this.briefing = null;
+    this.hud.hideBriefing();
     this.state = 'playing';
   }
 
   /**
-   * Skips the rest of the sequence and starts the stage now.
+   * The green button, and the Enter key: whatever is between the player and the board, this
+   * is the way past it.
    *
-   * The CLEARED card is the one phase carrying work rather than just time: the next board
-   * is not built until it ends (see #updateInterlude). So skipping from there has to *do*
-   * that build rather than jump over it — otherwise the player is handed back the stage
-   * they just solved, already clear, with a clock running on nothing to do. Everything the
-   * cleared stage earned was banked before the card ever went up, so nothing is lost by
-   * cutting it short.
-   *
-   * Every other phase is a wait with a finished board already behind the panel.
+   * A briefing simply goes away — the board behind it is loaded and waiting. The CLEARED
+   * card is the one that carries work rather than only time: the next board is not built
+   * until its hold ends, so cutting it short has to *do* that build rather than jump over
+   * it, or the player is handed back the stage they just solved, already clear, with a
+   * clock running on nothing to do. Everything that stage earned was banked before the card
+   * ever went up, so nothing is lost by cutting it short.
    */
-  skipInterlude() {
+  playStage() {
+    if (this.briefing) {
+      this.#beginPlay();
+      return;
+    }
     if (!this.interlude) return;
-    if (this.interlude.phase === 'cleared') this.loadStage(this.stage + 1);
-    this.#beginPlay();
+    this.#enterStage(this.stage + 1);
   }
 
   // --- simulation ------------------------------------------------------------
@@ -914,8 +934,8 @@ export class Game {
    *
    * The run's numbers are still kept — best per stage, the run total, the clear time the
    * clock learns from — they are simply no longer read out at the player mid-run. A
-   * scoreboard between every stage is a stop, and the stage after this one is already
-   * being built behind the card that says you cleared this one.
+   * scoreboard between every stage is a stop; a card carrying the two numbers worth
+   * carrying is a beat, and the stage after this one is built the moment it ends.
    */
   #solveStage() {
     this.state = 'cleared';
@@ -948,10 +968,11 @@ export class Game {
     saveProgress(this.progress);
 
     this.paused = false;
-    this.interlude = { phase: 'cleared', remaining: INTERLUDE.CLEARED_MS };
+    this.interlude = { remaining: INTERLUDE.CLEARED_MS, total: INTERLUDE.CLEARED_MS };
     // What the stage paid, and what the run is worth now. The two numbers the player
     // actually wants off a scoreboard, without the scoreboard.
     this.hud.showCleared({ stage: this.stage, score, total: runTotal });
+    this.hud.setCountdown(1);
     this.hud.setPaused(false);
   }
 
@@ -962,7 +983,33 @@ export class Game {
 
   // --- render ----------------------------------------------------------------
 
+  /**
+   * How far into the endgame the clock is: 0 while there is time, 1 at the buzzer.
+   *
+   * Two ramps rather than one, because they say different things. `wash` opens at
+   * PANIC_FROM and is a warning — there is still time to do something about it. `shake`
+   * opens at SHAKE_FROM and is not information at all; it is the last few seconds felt
+   * rather than read.
+   *
+   * Both are gated on the stage actually being under way. The clock's fraction survives the
+   * end of a stage — a board lost to it sits at exactly zero — and a game-over panel over a
+   * board still shaking itself apart is the alarm outliving the emergency. `ending` counts
+   * as under way: the outcome is decided but the board is still up, and cutting the alarm
+   * out from under the callout would be a pop.
+   *
+   * An untimed stage pins the fraction at 1, so neither ever fires on one.
+   */
+  #panic() {
+    if (this.state !== 'playing' && this.state !== 'ending') return { wash: 0, shake: 0 };
+    const left = this.clock.fraction;
+    return {
+      wash: clamp((CLOCK.PANIC_FROM - left) / CLOCK.PANIC_FROM, 0, 1),
+      shake: clamp((CLOCK.SHAKE_FROM - left) / CLOCK.SHAKE_FROM, 0, 1),
+    };
+  }
+
   render(now) {
+    const panic = this.#panic();
     this.renderer.draw({
       ropes: this.ropes,
       knots: this.knotMarkers,
@@ -980,6 +1027,10 @@ export class Game {
       // the jump; the game only says when it was struck.
       cursedPop: this.combo.pop,
       grabbedId: this.grab ? this.ropes[this.grab.ropeIndex].id : -1,
+      // The endgame, as two intensities. The renderer owns what red looks like and how the
+      // board shakes; the game only says how far gone the clock is.
+      panic: panic.wash,
+      shake: panic.shake,
       showMarkers: this.progress.options.markers,
       margin: this.margin,
       time: now,
@@ -1030,9 +1081,4 @@ export class Game {
 
 function midpointOf(rope) {
   return rope.nodes[(rope.nodes.length / 2) | 0];
-}
-
-/** "3.00" down to "0.00". Hundredths because a number moving that fast reads as urgent. */
-function countdownText(remaining) {
-  return (Math.max(0, remaining) / 1000).toFixed(2);
 }

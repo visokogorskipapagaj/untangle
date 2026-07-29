@@ -25,6 +25,13 @@ const DEFAULTS = () => ({
    * record is empty or absent.
    */
   times: {},
+  /**
+   * Briefings this record has already been shown, `{ clock: true }` — see BRIEFING in
+   * config.js. Each one is a panel that opens on the stage its mechanic arrives and never
+   * again, so this is the whole of "again". Absent on any record written before they
+   * existed, which is the same state as a new player's and needs no migration.
+   */
+  briefed: {},
   options: { distinct: false, markers: true },
 });
 
@@ -75,6 +82,15 @@ export function loadProgress() {
         .filter((ms) => typeof ms === 'number' && Number.isFinite(ms) && ms > 0)
         .slice(-CLOCK.KEEP);
       if (clean.length) progress.times[stage] = clean;
+    }
+  }
+
+  // Only ever `true` is copied across, and only for keys that look like card names. A
+  // hand-edited record cannot use this to hide a briefing behind a truthy string, and it
+  // cannot grow: an unknown key is simply a briefing that does not exist.
+  if (isPlainObject(parsed.briefed)) {
+    for (const [key, seen] of Object.entries(parsed.briefed)) {
+      if (/^[a-z][a-z0-9]*$/.test(key) && seen === true) progress.briefed[key] = true;
     }
   }
 

@@ -1,4 +1,4 @@
-import { COMBO, COMBO_HUD, ROPE } from './config.js';
+import { CLOCK, COMBO, COMBO_HUD, ROPE } from './config.js';
 import { clamp } from './geometry.js';
 
 /**
@@ -16,6 +16,9 @@ const { ORIGIN_Y, TOTAL_DY, NAME_DY, BANNER_Y } = COMBO_HUD;
 /** Height of the hop the cursed readout takes each time the multiplier climbs. */
 const CURSED_HOP_PX = 11;
 
+/** The red the board goes as the clock runs out. Alpha is the panic ramp's to set. */
+const PANIC_RGB = '196, 26, 20';
+
 /**
  * Canvas renderer.
  *
@@ -30,6 +33,14 @@ export class Renderer {
     this.width = 0;
     this.height = 0;
     this.dpr = 1;
+    /**
+     * Live, because `matches` is read fresh on every frame that would shake — the player
+     * can turn this on mid-run and it takes effect on the next one. The stylesheet already
+     * stands the shudder and the pause pulse down for the same preference; the endgame
+     * shake is the one piece of sustained motion that is not the stylesheet's to switch
+     * off, so it has to ask here.
+     */
+    this.calmly = globalThis.window?.matchMedia?.('(prefers-reduced-motion: reduce)') ?? null;
   }
 
   resize(cssWidth, cssHeight) {
@@ -46,7 +57,16 @@ export class Renderer {
     ctx.save();
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
 
-    this.#background();
+    this.#background(state.panic || 0, state.time);
+
+    // Everything above the background shakes together in the last few seconds — the ropes,
+    // the markers, the combo readout, the lot. The background is deliberately outside it:
+    // it is a full-bleed fill, and shaking it would drag its own edge into frame and leave
+    // a bare strip down one side of the board.
+    //
+    // The HUD is DOM and is left alone on purpose. It carries the clock, which is the one
+    // thing the player needs to be able to read while this is happening.
+    this.#shake(state.shake || 0, state.time);
 
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
@@ -75,7 +95,7 @@ export class Renderer {
     ctx.restore();
   }
 
-  #background() {
+  #background(panic = 0, time = 0) {
     const { ctx } = this;
     ctx.fillStyle = '#0a0d13';
     ctx.fillRect(0, 0, this.width, this.height);
@@ -88,6 +108,65 @@ export class Renderer {
     g.addColorStop(1, 'rgba(0, 0, 0, 0)');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, this.width, this.height);
+
+    if (panic > 0) this.#panicWash(panic, time);
+  }
+
+  /**
+   * The board going red as the clock runs out — a second radial gradient laid straight over
+   * the one above, and pointed the other way.
+   *
+   * The one underneath is brightest in the middle, because the middle is where the board
+   * is. This one is *weakest* there and strongest at the edges, so the colour closes in
+   * from the frame rather than settling on the puzzle. That is not decoration: the player
+   * is expected to still clear this stage, and a flat red over the ropes is the alarm
+   * making the thing it is warning about harder to do.
+   *
+   * It breathes, and it breathes faster the further gone the clock is. A tint held at a
+   * fixed value reads as a filter somebody left on; the same tint moving reads as an alarm.
+   */
+  #panicWash(panic, time) {
+    const { ctx } = this;
+    // Between about a second and a half and half a second a beat, which is a pulse rate
+    // rather than a flicker — it must never be mistaken for the screen malfunctioning.
+    const beat = 0.5 + 0.5 * Math.sin(time * (0.004 + panic * 0.008));
+    const peak = CLOCK.PANIC_ALPHA * panic * (0.82 + beat * 0.18);
+
+    const g = ctx.createRadialGradient(
+      this.width * 0.5, this.height * 0.45, 0,
+      this.width * 0.5, this.height * 0.45, Math.max(this.width, this.height) * 0.72,
+    );
+    g.addColorStop(0, `rgba(${PANIC_RGB}, ${(peak * CLOCK.PANIC_CORE).toFixed(4)})`);
+    // The knee, not a midpoint: without it the ramp from core to edge is linear across the
+    // whole board and the strong end only exists in the corners, where nobody is looking.
+    g.addColorStop(0.55, `rgba(${PANIC_RGB}, ${(peak * 0.55).toFixed(4)})`);
+    g.addColorStop(1, `rgba(${PANIC_RGB}, ${peak.toFixed(4)})`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, this.width, this.height);
+  }
+
+  /**
+   * The last few seconds, felt rather than read.
+   *
+   * Two incommensurate sines per axis, the same trick the cursed readout uses and for the
+   * same reason: a single sine is a rhythm, and the eye tunes a rhythm out within a second
+   * or two. The weights on each pair sum to 1, so SHAKE_PX is exactly the furthest it ever
+   * travels from centre.
+   *
+   * It moves the drawing and not the model, so a rope is up to SHAKE_PX from where the
+   * pointer thinks it is. Against a grab radius of 22px that is well inside the tolerance
+   * the game already allows, and being slightly harder to grab at four seconds left is the
+   * intended effect rather than a cost of it.
+   */
+  #shake(intensity, time) {
+    // The wash carries the same news in a form nobody has to brace for, so standing this
+    // down costs the player no information at all.
+    if (intensity <= 0 || this.calmly?.matches) return;
+    const amp = CLOCK.SHAKE_PX * intensity;
+    this.ctx.translate(
+      (Math.sin(time * 0.071) * 0.62 + Math.sin(time * 0.163) * 0.38) * amp,
+      (Math.cos(time * 0.089) * 0.58 + Math.sin(time * 0.197) * 0.42) * amp,
+    );
   }
 
   #rope(rope, held, time = 0) {

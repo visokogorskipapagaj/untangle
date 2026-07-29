@@ -29,12 +29,14 @@ function stubHud() {
     showCleared(info) {
       this.calls.push(['cleared', info]);
     },
-    showCountdown(stage, taunt) {
-      this.calls.push(['countdown', { stage, taunt }]);
+    setCountdown(level) {
+      this.countdown = level;
     },
-    setCountdown(text) {
-      this.countdown = text;
+    showBriefing(key, info) {
+      this.calls.push(['briefing', { key, ...info }]);
+      return true;
     },
+    hideBriefing() {},
     setPaused(paused) {
       this.paused = paused;
     },
@@ -141,6 +143,14 @@ function clear(game, ropeIndex, holdMs = 0) {
 
 const outcome = (hud) => hud.calls[hud.calls.length - 1];
 
+/** The state the renderer is actually handed, which is where the panic wash reads from. */
+function drawn(game) {
+  let state = null;
+  game.renderer = { resize() {}, draw: (s) => (state = s) };
+  game.render(0);
+  return state;
+}
+
 // --- running the clock ------------------------------------------------------------
 
 test('the clock runs while the stage is played', () => {
@@ -239,6 +249,99 @@ test('a stage cannot be won by holding a rope until the answer arrives', () => {
   assert.equal(game.tracker.count, 0, 'the board really is clear');
   assert.equal(outcome(game.hud)[0], 'gameover', 'and it was cleared out of time');
 });
+
+// --- the endgame, said by the board -------------------------------------------------
+
+/**
+ * The panic wash and the shake, which are the clock said in a way you do not have to be
+ * looking at the corner to hear. Both are fractions of the *deadline* rather than counts of
+ * seconds: nearly out of forty seconds and nearly out of three minutes are the same feeling.
+ */
+
+test('the board is calm for the first four fifths of the clock', () => {
+  const game = makeGame({ limit: 100000 });
+
+  assert.equal(drawn(game).panic, 0, 'nothing at the start');
+
+  advance(game, 79000);
+  assert.equal(drawn(game).panic, 0, 'and nothing at 21% left');
+});
+
+test('the red comes on at a fifth left and fills as the clock empties', () => {
+  const game = makeGame({ limit: 100000 });
+
+  advance(game, 80000);
+  assertNear(drawn(game).panic, 0, 'it opens at exactly zero rather than snapping on');
+
+  advance(game, 10000);
+  assertNear(drawn(game).panic, 0.5, 'half the endgame spent, half the wash');
+
+  advance(game, 9000);
+  assertNear(drawn(game).panic, 0.95, 'and it is nearly full at a second to go');
+});
+
+test('the shake holds off until the last twentieth, and then ramps on its own', () => {
+  const game = makeGame({ limit: 100000 });
+
+  advance(game, 90000);
+  assert.ok(drawn(game).panic > 0, 'the wash is well under way');
+  assert.equal(drawn(game).shake, 0, 'and the board is still still');
+
+  advance(game, 5000);
+  assertNear(drawn(game).shake, 0, 'it opens at zero too');
+
+  advance(game, 2500);
+  assertNear(drawn(game).shake, 0.5);
+
+  advance(game, 2400);
+  assert.ok(drawn(game).shake > 0.9, 'wide open by the buzzer');
+});
+
+test('neither ever fires on a stage nobody has cleared', () => {
+  // An untimed stage has its fraction pinned at 1, so there is no endgame to be in. A board
+  // going red on a clock that is not running would be the alarm inventing an emergency.
+  const game = makeGame({ limit: null });
+  advance(game, 10 * 60 * 1000);
+
+  assert.equal(drawn(game).panic, 0);
+  assert.equal(drawn(game).shake, 0);
+});
+
+test('the alarm does not outlive the stage it was warning about', () => {
+  // The clock's fraction survives the end of a stage — a board lost to it sits at exactly
+  // zero — so without a gate the game-over panel comes up over a board still shaking itself
+  // apart at full red.
+  const game = makeGame({ limit: 5000 });
+  advance(game, 4900);
+  assert.ok(drawn(game).shake > 0, 'sanity: it was going right up to the buzzer');
+
+  advance(game, 200);
+  assert.equal(game.state, 'gameover');
+  assert.equal(drawn(game).panic, 0, 'and it stops the moment the stage does');
+  assert.equal(drawn(game).shake, 0);
+});
+
+test('a stage cleared on the buzzer keeps the alarm through the callout', () => {
+  // `ending` is the beat a combo callout gets before the panel covers the board. The stage
+  // is decided but the board is still up, and cutting the wash out from under the callout
+  // would be a pop on the one frame the player is looking at it.
+  const game = makeGame({ limit: 30000 });
+  advance(game, 29000);
+
+  drag(game, 0, 0, -170);
+  game.pending = { finish: 'solve', reason: 'moves', delay: 500 };
+  game.state = 'ending';
+
+  assert.ok(drawn(game).panic > 0.8, 'still red while the callout lands');
+  assert.ok(drawn(game).shake > 0);
+});
+
+function assertNear(actual, expected, message = '') {
+  assert.ok(
+    Math.abs(actual - expected) < 0.02,
+    `${message} — expected about ${expected}, got ${actual}`,
+  );
+}
 
 // --- what gets recorded ------------------------------------------------------------
 

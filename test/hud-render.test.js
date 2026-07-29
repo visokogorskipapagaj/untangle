@@ -151,13 +151,11 @@ test('burning outranks full — one box cannot say both', () => {
 
 // --- between stages -------------------------------------------------------------------
 
-test('the cleared card comes up alone, carrying what the stage paid', () => {
+test('the cleared card comes up carrying what the stage paid', () => {
   hud.showCleared({ stage: 4, score: 12850.4, total: 41200 });
 
   assert.equal(el('overlay-interlude').classList.contains('is-hidden'), false);
   assert.equal(el('cleared-stage').textContent, '4');
-  assert.equal(el('card-cleared').classList.contains('is-hidden'), false);
-  assert.equal(el('card-countdown').classList.contains('is-hidden'), true);
 
   // Rounded and grouped, the same as the HUD's own score readout.
   assert.equal(el('cleared-score').textContent, '12,850');
@@ -170,35 +168,29 @@ test('a stage worth nothing still reads as a number rather than a blank', () => 
   assert.equal(el('cleared-total').textContent, '0');
 });
 
-test('the countdown swaps in, and the two cards animate as a pair', () => {
-  hud.showCleared({ stage: 4, score: 900, total: 900 });
-  hud.showCountdown(5, false);
+test('the controls live inside the modal, under the text', () => {
+  // They used to float over the board below the panel, which is why they were sized to match
+  // the HUD's icon buttons. Inside the panel they are ordinary panel buttons — and being
+  // inside means the markup order is what puts them under the text rather than over it.
+  const panel = html.slice(html.indexOf('id="overlay-interlude"'), html.indexOf('Briefings.'));
+  const headline = panel.indexOf('interlude__headline');
+  const actions = panel.indexOf('interlude__actions');
 
-  assert.equal(el('card-cleared').classList.contains('is-leaving'), true, 'out to the left');
-  assert.equal(el('card-countdown').classList.contains('is-entering'), true, 'in from the right');
-  assert.equal(el('card-countdown').classList.contains('is-hidden'), false);
-  assert.equal(el('countdown-stage').textContent, '5');
+  assert.ok(headline > -1 && actions > headline, 'the buttons come after the card text');
+  assert.ok(
+    panel.indexOf('id="btn-pause"') > actions && panel.indexOf('id="btn-skip"') > actions,
+    'and both of them are in that row',
+  );
 });
 
-test('a countdown with nothing to replace just arrives', () => {
-  hud.hideInterlude();
-  hud.showCountdown(1, false);
+test('starting the stage is the green button, and says what it does', () => {
+  // It is the way out of a wait, which makes it the thing the player is there to press —
+  // and "Skip" described the mechanism rather than the outcome.
+  const button = html.slice(html.indexOf('id="btn-skip"'), html.indexOf('</button>', html.indexOf('id="btn-skip"')));
 
-  assert.equal(el('card-cleared').classList.contains('is-hidden'), true);
-  assert.equal(el('card-countdown').classList.contains('is-entering'), false, 'nothing to swap with');
-  assert.equal(el('card-countdown').classList.contains('is-hidden'), false);
-});
-
-test('skip is offered for the whole sequence, including the cleared card', () => {
-  // It used to be hidden outside the countdown, because skipping the CLEARED card would
-  // have handed back the solved board. Skipping now *builds* the next board on the way
-  // through, so there is no phase where the button would be present but inert — and none
-  // where it has to be taken away either.
-  hud.showCleared({ stage: 4, score: 900, total: 900 });
-  assert.equal(el('btn-skip').classList.contains('is-hidden'), false, 'offered on cleared');
-
-  hud.showCountdown(5, false);
-  assert.equal(el('btn-skip').classList.contains('is-hidden'), false, 'and on the count');
+  assert.match(button, /class="[^"]*\bbtn--primary\b/, 'the primary treatment is the green one');
+  assert.match(button, />Play stage</, 'with a visible label saying so');
+  assert.ok(!/>Skip</.test(button), 'and nothing left calling it a skip');
 });
 
 test('the skip icon is drawn rather than typed, and takes its colour from the button', () => {
@@ -216,36 +208,116 @@ test('the skip icon is drawn rather than typed, and takes its colour from the bu
   assert.ok(!/&#\d+;/.test(button), 'and no glyph smuggled in beside it');
 });
 
-test('the skip button out-specifies .btn, or its icon is not centred', () => {
-  // `.btn` sets `padding: 11px 22px` for a text label and is declared after the interlude
-  // block, so a bare `.interlude__skip` rule loses the tie on equal specificity. With
-  // box-sizing: border-box and a fixed width that left a 2px content box for a 20px icon.
-  // Nothing about the result looks like a specificity problem when you are staring at it,
-  // which is exactly why it is worth pinning.
-  assert.match(css, /\.btn\.interlude__skip\s*\{/, 'the padding override must be qualified');
+test('the hold is a level behind the card, and it falls', () => {
+  hud.setCountdown(1);
+  assert.equal(el('interlude-timer').style.transform, 'scaleY(1.000)', 'full at the start');
 
-  const rule = css.slice(css.indexOf('.btn.interlude__skip'));
+  hud.setCountdown(0.25);
+  assert.equal(el('interlude-timer').style.transform, 'scaleY(0.250)');
+
+  hud.setCountdown(0);
+  assert.equal(el('interlude-timer').style.transform, 'scaleY(0.000)', 'and empty when it is up');
+});
+
+test('the hold bar is anchored at the bottom, so the level falls rather than rises', () => {
+  // scaleY alone says nothing about which edge moves. Anchored anywhere else the tint
+  // shrinks upward, which reads as filling — the exact opposite of counting down.
+  const rule = css.slice(css.indexOf('.interlude__timer i'));
   const body = rule.slice(rule.indexOf('{'), rule.indexOf('}'));
-  assert.match(body, /padding:\s*0/, 'the text-label padding has to be cleared');
-  assert.match(body, /color:\s*#fff/, 'and the colour set, since the icon inherits it');
+  assert.match(body, /transform-origin:[^;]*bottom/, 'the bottom edge is the one that stays');
+  assert.match(body, /background:\s*var\(--white-10\)/, 'drawn in the shared 10% white token');
+  assert.match(css, /--white-10:\s*rgba\(255,\s*255,\s*255,\s*0\.1\)/, 'which is what it says');
 });
 
-test('GO is marked as its own thing, and the number is not', () => {
-  hud.setCountdown('2.41');
-  assert.equal(el('countdown-value').textContent, '2.41');
-  assert.equal(el('countdown-value').classList.contains('is-go'), false);
-
-  hud.setCountdown('GO');
-  assert.equal(el('countdown-value').textContent, 'GO');
-  assert.equal(el('countdown-value').classList.contains('is-go'), true);
+test('a level written twice is only written to the DOM once', () => {
+  // It is set every frame while a card is up. Rounded to the same three decimals it is the
+  // same picture, and a transform re-written sixty times a second for it is sixty style
+  // recalculations for nothing.
+  hud.setCountdown(0.5);
+  el('interlude-timer').style.transform = 'touched';
+  hud.setCountdown(0.5004);
+  assert.equal(el('interlude-timer').style.transform, 'touched', 'no second write');
 });
 
-test('the taunt belongs to Rip & Tear and is put away afterwards', () => {
-  hud.showCountdown(30, true);
-  assert.equal(el('countdown-taunt').classList.contains('is-hidden'), false);
+// --- briefings ---------------------------------------------------------------------------
 
-  hud.showCountdown(31, false);
-  assert.equal(el('countdown-taunt').classList.contains('is-hidden'), true);
+test('a briefing opens one card and puts every other one away', () => {
+  assert.equal(hud.showBriefing('cursed', { stage: 16, limit: 40000 }), true);
+
+  assert.equal(el('overlay-briefing').classList.contains('is-hidden'), false);
+  assert.equal(el('brief-stage').textContent, '16');
+  assert.equal(el('brief-cursed').classList.contains('is-hidden'), false);
+  assert.equal(el('brief-clock').classList.contains('is-hidden'), true);
+  assert.equal(el('brief-riptear').classList.contains('is-hidden'), true);
+
+  hud.showBriefing('riptear', { stage: 30, limit: null });
+  assert.equal(el('brief-riptear').classList.contains('is-hidden'), false);
+  assert.equal(el('brief-cursed').classList.contains('is-hidden'), true, 'the last one is gone');
+});
+
+test('a card the markup does not have opens nothing at all', () => {
+  // The stage -> card map lives in config.js and the cards live in index.html. A key with
+  // no card must be a briefing that does not happen, not a stage load that throws.
+  hud.hideBriefing();
+  assert.equal(hud.showBriefing('nonesuch', { stage: 2 }), false);
+  assert.equal(el('overlay-briefing').classList.contains('is-hidden'), true);
+});
+
+test('the clock briefing quotes the deadline, in the units a briefing wants', () => {
+  hud.showBriefing('clock', { stage: 1, limit: 72400 });
+
+  assert.equal(el('brief-clock-limit').textContent, '1:13');
+  assert.equal(el('brief-clock-timed').classList.contains('is-hidden'), false);
+  assert.equal(el('brief-clock-untimed').classList.contains('is-hidden'), true);
+});
+
+test('a briefing on an untimed stage does not invent a time limit', () => {
+  // Stage 1 with no record anywhere is genuinely untimed, and a panel announcing a clock
+  // that is not running is worse than no panel.
+  hud.showBriefing('clock', { stage: 1, limit: null });
+
+  assert.equal(el('brief-clock-timed').classList.contains('is-hidden'), true);
+  assert.equal(el('brief-clock-untimed').classList.contains('is-hidden'), false);
+  assert.equal(el('brief-clock-limit').textContent, '∞', 'and it says so in the HUD\'s own sign');
+});
+
+test('the tenths the readout drops to are not a thing a briefing says', () => {
+  // formatClock switches to a decimal inside the last five seconds, which is urgency rather
+  // than information. A sentence about a clock wants "0:04", not "4.2".
+  hud.showBriefing('clock', { stage: 1, limit: 4200 });
+  assert.equal(el('brief-clock-limit').textContent, '0:05');
+});
+
+test('the briefing panel is one door out, and it is the same green one', () => {
+  const from = html.indexOf('id="btn-brief-play"');
+  assert.ok(from > -1, 'the briefing needs a way out');
+  const button = html.slice(from, html.indexOf('</button>', from));
+
+  assert.match(button, /class="[^"]*\bbtn--primary\b/, 'the primary treatment, as on the card');
+  assert.match(button, />Play stage</, 'saying the same thing it says there');
+  assert.match(button, /<svg[^>]*viewBox="[^"]+"/, 'and carrying the same drawn icon');
+});
+
+test('every briefing card the HUD can open exists in the markup', () => {
+  // The map in hud.js is the join between BRIEFING's keys and the cards. A key with no card
+  // is a briefing that silently never opens, which is invisible until stage 16.
+  const source = readFileSync(join(root, 'src/hud.js'), 'utf8');
+  const config = readFileSync(join(root, 'src/config.js'), 'utf8');
+
+  const mapped = [...source.matchAll(/^ {8}([a-z]+): \$\('(brief-[a-z-]+)'\)/gm)];
+  assert.ok(mapped.length >= 3, 'sanity: the briefing card map was parsed');
+  for (const [, , id] of mapped) assert.ok(htmlIds.has(id), `index.html is missing #${id}`);
+
+  // And the other side of the join: every card config can ask for is one the HUD has.
+  const known = new Set(mapped.map(([, key]) => key));
+  const stages = config.match(/STAGES:\s*\{([^}]*)\}/);
+  const riptear = config.match(/RIP_AND_TEAR:\s*'([a-z]+)'/);
+  assert.ok(stages && riptear, 'BRIEFING should declare both its stage map and Rip & Tear\'s');
+
+  const wanted = [...stages[1].matchAll(/'([a-z]+)'/g)].map((m) => m[1]).concat(riptear[1]);
+  assert.ok(wanted.length >= 3, 'sanity: the config side was parsed');
+  const orphans = wanted.filter((key) => !known.has(key));
+  assert.deepEqual(orphans, [], `BRIEFING names cards hud.js cannot open: ${orphans}`);
 });
 
 test('pausing relabels the button and marks the overlay', () => {
@@ -264,26 +336,36 @@ test('pausing relabels the button and marks the overlay', () => {
   assert.equal(el('btn-pause').textContent, '', 'the label never lands in the button body');
 });
 
-test('hiding the interlude takes both cards down with it', () => {
-  hud.showCleared({ stage: 4, score: 900, total: 900 });
-  hud.showCountdown(5, false);
-  hud.hideInterlude();
-
-  assert.equal(el('overlay-interlude').classList.contains('is-hidden'), true);
-  assert.equal(el('card-cleared').classList.contains('is-hidden'), true);
-  assert.equal(el('card-countdown').classList.contains('is-hidden'), true);
-  assert.equal(el('card-cleared').classList.contains('is-leaving'), false, 'and resets the animation');
+test('a held sequence is marked on the button that held it', () => {
+  // Everything else in the modal expresses pause by not moving, which is indistinguishable
+  // from a phase that is simply long. The stroke is the only thing saying held rather than
+  // slow, so it has to be both coloured and alive.
+  const rule = css.match(/\.overlay--interlude\.is-paused \.interlude__pause \{([^}]*)\}/);
+  assert.ok(rule, 'the paused overlay must reach the pause button itself');
+  assert.match(rule[1], /border-color:\s*var\(--amber\)/, 'a yellow stroke');
+  assert.match(rule[1], /animation:\s*pause-breathe/, 'that breathes');
+  assert.match(css, /@keyframes pause-breathe/, 'and the pulse it names exists');
 });
 
-test('the interlude counts as an overlay, so input stands down behind it', () => {
+test('both panels between the stages count as overlays, so input stands down', () => {
   hud.hideTitle();
   hud.hideGameOver();
   hud.hideSettings();
   hud.hideInterlude();
+  hud.hideBriefing();
   assert.equal(hud.anyOverlayOpen, false);
+  assert.equal(hud.briefingOpen, false);
 
   hud.showCleared({ stage: 2, score: 10, total: 10 });
   assert.equal(hud.anyOverlayOpen, true, 'a card up must freeze the board');
+
+  hud.hideInterlude();
+  hud.showBriefing('clock', { stage: 1, limit: null });
+  assert.equal(hud.briefingOpen, true);
+  assert.equal(hud.anyOverlayOpen, true, 'and so must a briefing — the clock rides on this');
+
+  hud.hideBriefing();
+  assert.equal(hud.anyOverlayOpen, false);
 });
 
 // --- game over --------------------------------------------------------------------------
@@ -329,16 +411,16 @@ function keyboardHud() {
   return { fired, press: (key, opts = {}) => globalThis.keyHandlers.at(-1)({ key, ...opts }) };
 }
 
-test('Enter skips the wait between stages', () => {
+test('Enter is the way past whatever is between you and the board', () => {
   const { fired, press } = keyboardHud();
 
   press('Enter');
-  assert.deepEqual(fired, [['onSkip']]);
+  assert.deepEqual(fired, [['onPlayStage']]);
 });
 
 test('Enter does not fire the shortcut while a button has focus', () => {
   // Enter already activates a focused button. Hijacking it here would fire both, so
-  // tabbing to PAUSE and pressing Enter would pause and skip in one keystroke.
+  // tabbing to PAUSE and pressing Enter would pause and start the stage in one keystroke.
   const { fired, press } = keyboardHud();
   globalThis.document.activeElement = { tagName: 'BUTTON' };
 
@@ -347,7 +429,7 @@ test('Enter does not fire the shortcut while a button has focus', () => {
 
   globalThis.document.activeElement = null;
   press('Enter');
-  assert.deepEqual(fired, [['onSkip']], 'and it works again once focus is elsewhere');
+  assert.deepEqual(fired, [['onPlayStage']], 'and it works again once focus is elsewhere');
 });
 
 test('held keys do not repeat-fire the hotkeys', () => {
@@ -355,7 +437,7 @@ test('held keys do not repeat-fire the hotkeys', () => {
 
   press('Enter', { repeat: true });
   press('r', { repeat: true });
-  assert.deepEqual(fired, [], 'auto-repeat is not a stream of skips and restarts');
+  assert.deepEqual(fired, [], 'auto-repeat is not a stream of stage starts and restarts');
 });
 
 test('a modified Enter belongs to the browser, not the game', () => {

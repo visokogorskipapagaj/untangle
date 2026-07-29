@@ -6,6 +6,10 @@
   --panel: rgba(14, 18, 26, 0.92);
   --accent: #5ee6a8;
   --warn: #ff7a6b;
+  /* The one warning that is not yet a problem: low on moves, low on time, held. */
+  --amber: #ffd166;
+  /* A plain wash over whatever is behind it. The interlude's countdown is drawn in it. */
+  --white-10: rgba(255, 255, 255, 0.1);
   --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
@@ -94,7 +98,7 @@ html, body {
 
 /* Running low on moves, then burning through banked ones, are the two states the player
    most needs to notice without looking away from the ropes. */
-.stat--moves.is-low .stat__value { color: #ffd166; }
+.stat--moves.is-low .stat__value { color: var(--amber); }
 .stat--moves.is-empty .stat__value { color: var(--warn); }
 .stat--moves.is-empty .stat__label { color: var(--warn); }
 
@@ -104,7 +108,7 @@ html, body {
    is deliberately quiet: dimmed to the label colour so an infinity sign sitting in the HUD
    reads as "no deadline here" rather than as a stat waiting to be filled in. */
 .stat--time.is-untimed .stat__value { color: var(--muted); }
-.stat--time.is-low .stat__value { color: #ffd166; }
+.stat--time.is-low .stat__value { color: var(--amber); }
 /* The last few seconds, where the readout has switched to tenths. The pulse is on the
    whole stat rather than the digits so it stays visible in peripheral vision, which is
    where the player's attention actually is by this point. */
@@ -180,7 +184,7 @@ html, body {
 }
 
 /* Deep into a chain the window is tightest, so it runs hot rather than staying calm. */
-.chain-meter.is-hot i { background: #ffd166; }
+.chain-meter.is-hot i { background: var(--amber); }
 
 /* Final sliver: it goes red and buzzes, because at this point the player has a couple of
    frames to react and a colour change alone is easy to miss mid-drag. */
@@ -355,51 +359,58 @@ html, body {
 
 /* ---------- Between stages ---------- */
 
-/* Lighter than the other overlays and blurred less: this one is a "get ready", and the
-   board being counted into is the thing worth looking at behind it. */
+/* Lighter than the other overlays and blurred less: this one is a beat rather than a stop,
+   and the board waiting behind it is the thing worth looking at. */
 .overlay--interlude {
   background: rgba(10, 13, 19, 0.55);
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px);
 }
 
-.interlude {
-  display: grid;
-  justify-items: center;
-  gap: 16px;
-  width: min(460px, 100%);
+/* Clipped, which is what holds the countdown wash behind everything to the panel's own
+   rounded corners rather than letting it square them off. */
+.panel--interlude {
+  position: relative;
+  padding: 26px 32px 30px;
+  overflow: hidden;
 }
 
-/* Below the cards and outside the stack, so they hold still while the cards swipe past. */
-.interlude__actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  pointer-events: auto;
+/* The hold, as a level rather than a number: the panel is washed in 10% white, and the wash
+   drains from the top edge to the bottom across the three seconds — which used to sit there
+   with nothing saying how long three seconds was. Anchored to the bottom so the level
+   *falls*: what is left of the tint is what is left of the time. Hud.setCountdown writes
+   the scale. */
+.interlude__timer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
 }
+.interlude__timer i {
+  display: block;
+  height: 100%;
+  background: var(--white-10);
+  transform-origin: center bottom;
+  will-change: transform;
+}
+/* Held: a stopped level and a slow one look identical, so the wash steps back and lets the
+   pulsing button below say it. */
+.overlay--interlude.is-paused .interlude__timer { opacity: 0.35; }
 
-/* The interlude's two controls, sized to sit alongside the HUD's icon buttons rather than
-   inventing a second button shape: same 34px box and same 17px icon. They keep their
-   labels — pause and skip are the only two controls on screen between stages, and a bare
-   pair of glyphs there is a guess rather than a choice.
+/* Everything else, above the wash. Without a stacking position of its own the absolutely
+   positioned timer paints over the text — neither is positioned otherwise, and the timer
+   wins on paint order. */
+.interlude__body { position: relative; }
 
-   Qualified with `.btn` on purpose. `.btn` sets `padding: 11px 22px` for a text label and
-   is declared further down this file, so an unqualified rule up here loses the tie on
-   equal specificity — and at `box-sizing: border-box` that padding fights the fixed
-   height. */
-.btn.interlude__pause,
-.btn.interlude__skip {
-  height: 34px;
-  padding: 0 14px;
-  /* The icons paint with currentColor, so this is what makes them white. --ink is a touch
-     off-white, which is right for a body of text and a shade dim for a lone glyph. */
-  color: #fff;
-}
-.interlude__pause svg,
-.interlude__skip svg {
-  width: 17px;
-  height: 17px;
-}
+/* Inside the modal, under the text, and at the size every other button in a panel is: they
+   used to float over the board on their own, where matching the HUD's 34px icon buttons was
+   what kept them from looking like a second button system. */
+.interlude__actions { margin-top: 26px; }
+
+/* Wide enough for "Resume", which is the longer of the two labels it carries. Without it
+   the row re-centres itself the moment the game is held, and the green button beside it —
+   the one thing on the panel the player is aiming at — slides out from under the cursor. */
+.btn.interlude__pause { min-width: 130px; }
 
 /* One button, two icons, and the overlay's own `is-paused` decides which. Keeping both in
    the DOM is what lets the label live in a span instead of in the button's text — see
@@ -408,25 +419,33 @@ html, body {
 .overlay--interlude.is-paused .interlude__pause .icon-pause { display: none; }
 .overlay--interlude.is-paused .interlude__pause .icon-play { display: block; }
 
-/* One cell, both cards. They overlap only while swapping, and the cell staying as big as
-   the largest card is what stops the panel resizing under the swap — which is also why the
-   hidden card is only `visibility: hidden` and still takes up its space.
+/* Held, and saying so. The rest of the modal expresses pause by *not moving*, which is
+   exactly what a long phase looks like anyway, so the button that did it breathes. Animated
+   on the stroke and on a ring outside it — box-shadow takes no layout space, so nothing
+   shifts and the green button beside it does not move. */
+.overlay--interlude.is-paused .interlude__pause {
+  border-color: var(--amber);
+  color: var(--amber);
+  animation: pause-breathe 1.8s ease-in-out infinite;
+}
 
-   Centred rather than stretched: the two cards are different heights now that the cleared
-   one carries a score, and stretching would blow the short one up to the tall one's height
-   and strand its contents against the top edge. */
-.interlude__stack {
-  display: grid;
-  align-items: center;
-  width: 100%;
-  overflow: hidden;
+/* The amber is --amber at varying alpha; it is spelled out because a keyframe cannot fade a
+   token without color-mix, and the two values have to stay in step by hand. */
+@keyframes pause-breathe {
+  0%, 100% {
+    border-color: rgba(255, 209, 102, 0.95);
+    box-shadow: 0 0 0 3px rgba(255, 209, 102, 0.18);
+  }
+  50% {
+    border-color: rgba(255, 209, 102, 0.34);
+    box-shadow: 0 0 0 3px rgba(255, 209, 102, 0);
+  }
 }
-.panel--interlude {
-  grid-area: 1 / 1;
-  width: 100%;
-  padding: 26px 32px 30px;
+
+@media (prefers-reduced-motion: reduce) {
+  /* The solid stroke and the amber label carry it on their own. */
+  .overlay--interlude.is-paused .interlude__pause { animation: none; }
 }
-.panel--interlude.is-hidden { visibility: hidden; }
 
 .interlude__headline {
   margin: 0;
@@ -459,57 +478,65 @@ html, body {
   color: var(--ink);
 }
 
-.interlude__count {
-  margin: 10px 0 0;
-  font-family: var(--mono);
-  font-size: 52px;
-  font-variant-numeric: tabular-nums;
-  color: var(--accent);
-  line-height: 1.1;
+/* ---------- Briefings ---------- */
+
+/* Wider than the panels that carry a number, because this one carries sentences: 460px at
+   this size gives a measure short enough to read as a poem. Ragged left-aligned prose for
+   the same reason — centred body copy is a headline that got away from someone. */
+.panel--brief {
+  width: min(540px, 100%);
+  text-align: left;
+  /* The one panel that can outgrow a short window — the cursed card runs to four paragraphs
+     and a landscape phone is about 380px tall. It scrolls rather than being clipped, which
+     would take the button with it and leave no way out of the panel at all. */
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
-/* GO is the payoff and should land rather than merely appear. */
-.interlude__count.is-go {
-  animation: go-pop 220ms cubic-bezier(0.2, 1.4, 0.4, 1);
-  letter-spacing: 0.1em;
+.panel--brief .eyebrow { text-align: center; }
+
+/* One card per mechanic, all of them in the panel, one of them visible — and the same rule
+   hides the line inside a card that does not apply, which is how the clock briefing carries
+   both a timed and an untimed answer. Taken out of flow rather than merely made invisible:
+   nothing here overlaps, so the panel should be the height of the card that is up. */
+.brief.is-hidden,
+.brief .is-hidden { display: none; }
+
+.brief__title {
+  margin: 0 0 18px;
+  text-align: center;
+  font-size: clamp(24px, 6vw, 34px);
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-indent: 0.16em;
+  line-height: 1.15;
 }
-.interlude__taunt {
-  margin: 14px 0 0;
-  color: var(--warn);
+
+/* Same measure and colour as `.lede`, which is the other place this game writes paragraphs.
+   Not `.lede` itself, because these run to several and that one carries a bottom margin
+   sized for being the only one. */
+.brief p {
+  margin: 0 0 14px;
+  color: var(--muted);
+  line-height: 1.65;
   font-size: 14px;
-  line-height: 1.5;
 }
-.interlude__taunt.is-hidden { display: none; }
+.brief p:last-child { margin-bottom: 0; }
 
-/* Held: the count stops, so the card should visibly stop with it. */
-.overlay--interlude.is-paused .interlude__count { color: var(--muted); }
-
-/* The swap. Duration is INTERLUDE.SWIPE_MS in src/config.js — the script decides when the
-   next card starts counting, and it only lines up if both say 450ms. */
-@keyframes swipe-out-left {
-  from { transform: translateX(0); opacity: 1; }
-  to   { transform: translateX(-130%); opacity: 0; }
-}
-@keyframes swipe-in-right {
-  from { transform: translateX(130%); opacity: 0; }
-  to   { transform: translateX(0); opacity: 1; }
-}
-@keyframes go-pop {
-  from { transform: scale(0.72); }
-  to   { transform: scale(1); }
-}
-.panel--interlude.is-leaving {
-  animation: swipe-out-left 450ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
-}
-.panel--interlude.is-entering {
-  animation: swipe-in-right 450ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+/* The words the sentence turns on. Brought up to full ink rather than given a colour: an
+   accent on every third word is a page with no emphasis left. */
+.brief strong { color: var(--ink); font-weight: 600; }
+.brief .num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  /* The cards still swap, they just cross-fade instead of travelling. */
-  .panel--interlude.is-leaving  { animation: none; opacity: 0; }
-  .panel--interlude.is-entering { animation: none; }
-  .interlude__count.is-go { animation: none; }
-}
+/* The line that is a warning rather than an explanation. Two classes, so it outranks the
+   paragraph colour above it without reaching for !important. */
+.brief .brief__warn { color: var(--warn); }
+
+.brief__actions { margin-top: 26px; }
 
 .row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
 .panel--narrow .row { margin-top: 22px; }
@@ -531,8 +558,7 @@ html, body {
 /* A button that leads with an icon and keeps its label. "Retry stage" and "Restart from
    stage 1" carry the same reload icon and mean quite different things — one replays the
    board, the other throws the run away — so the icon decorates the label rather than
-   replacing it. The interlude's pause and skip are the icon-only case; they sit together
-   in a fixed spot, where position carries the meaning a label would. */
+   replacing it. */
 .btn--icon {
   display: inline-flex;
   align-items: center;
@@ -560,13 +586,6 @@ html, body {
   font-weight: 600;
 }
 .btn--danger:hover { background: rgba(255, 122, 107, 0.14); }
-
-/* Sits over the board rather than in a panel, so it needs a backing of its own. */
-.btn--ghost {
-  background: var(--panel);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-}
 
 .toggle {
   display: flex;
@@ -619,4 +638,11 @@ html, body {
   .stat { padding: 4px 7px; }
   .stat__value { font-size: 14px; }
   .stat__label { font-size: 9px; }
+}
+
+@media (max-width: 420px) {
+  /* Pause and Play stage come to about four pixels more than the panel has room for here,
+     and `.row` wraps rather than squeezing — which turns a control and its primary action
+     into a stacked list of two equal choices. The padding is what gives way. */
+  .panel--interlude { padding: 22px 18px 26px; }
 }

@@ -28,12 +28,14 @@ function stubHud() {
     showCleared(info) {
       this.calls.push(['cleared', info]);
     },
-    showCountdown(stage, taunt) {
-      this.calls.push(['countdown', { stage, taunt }]);
+    setCountdown(level) {
+      this.countdown = level;
     },
-    setCountdown(text) {
-      this.countdown = text;
+    showBriefing(key, info) {
+      this.calls.push(['briefing', { key, ...info }]);
+      return true;
     },
+    hideBriefing() {},
     setPaused(paused) {
       this.paused = paused;
     },

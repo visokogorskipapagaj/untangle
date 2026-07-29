@@ -484,6 +484,42 @@ export const CLOCK = {
   CRITICAL_MS: 5000,
 
   /**
+   * The endgame, said by the board rather than by the readout.
+   *
+   * Everything above is in milliseconds, because a readout with five seconds on it means
+   * the same thing on every stage. These are *fractions of the deadline*, because the board
+   * turning red does not mean "five seconds" — it means "you are nearly out", and nearly
+   * out of forty seconds and nearly out of three minutes are the same feeling and different
+   * numbers. A stage nobody has ever cleared runs untimed, its fraction is pinned at 1, and
+   * none of this ever fires on it.
+   *
+   * They are deliberately not the same threshold. The wash is a warning with time left to
+   * act on it; the shake is the last moment before the buzzer, and it is not information
+   * so much as panic.
+   */
+
+  /** Fraction of the deadline left at which the board starts going red. */
+  PANIC_FROM: 0.2,
+  /**
+   * How red it ever gets, at the very edge of the board and at zero on the clock. A quarter
+   * is enough to change the colour of the room without touching the ropes' legibility —
+   * this is a stage the player is still expected to clear, and they cannot clear what they
+   * cannot see.
+   */
+  PANIC_ALPHA: 0.25,
+  /**
+   * The share of that reached in the middle of the board, where the ropes are. The wash is
+   * one radial gradient over the one already there, and it runs the other way — weakest
+   * where the work is, strongest at the edges, so the colour closes in rather than settling
+   * on top of the puzzle.
+   */
+  PANIC_CORE: 0.32,
+
+  /** Fraction left at which the board itself starts shaking, and how far it goes, in px. */
+  SHAKE_FROM: 0.05,
+  SHAKE_PX: 5,
+
+  /**
    * Whether a stage nobody in the pool has ever cleared runs untimed.
    *
    * This used to be unconditional and per-player, and it was the rule that let a countdown
@@ -588,33 +624,51 @@ export const POOL = {
 /**
  * Between stages.
  *
- * A stage does not end in a scoreboard. It ends in a card that says you cleared it, which
- * slides away to reveal the next stage already counting itself in — the run keeps moving,
- * and the only thing that stops it is the player deciding to stop it. PAUSE is that
- * decision, and it is the reason the sequence can be this pushy: nothing is taken away
- * from a player who wants a moment, it just is not the default.
+ * A stage does not end in a scoreboard, and the next one does not begin with a countdown.
+ * It ends in a card that says you cleared it, which holds for a beat and then hands over
+ * the board — the run keeps moving, and the only thing that stops it is the player deciding
+ * to stop it. PAUSE is that decision, and it is the reason the card can be this pushy:
+ * nothing is taken away from a player who wants a moment, it just is not the default.
  *
- * The countdown is shown to hundredths, which is not a precision anyone reads. It is there
- * because a number moving that fast reads as a thing about to happen, where whole seconds
- * read as a thing being waited for.
+ * There used to be a count into every stage as well — a second card, a swipe between them,
+ * and GO. It was a wait on the way into a board the player could already see, three times a
+ * minute, and the one thing it protected against (a clock starting before anyone was
+ * looking) is a thing the clock does not do anyway: it does not tick behind a panel.
  */
 export const INTERLUDE = {
-  /** How long the CLEARED card holds before it slides away. */
+  /** How long the CLEARED card holds before the next board is handed over. */
   CLEARED_MS: 3000,
-
-  /**
-   * The swipe between the two cards. Must match the CSS animation on `.panel--interlude`
-   * — the JS owns when the next card starts counting, the stylesheet owns how it arrives,
-   * and the two only line up if this number is the same in both places.
-   */
-  SWIPE_MS: 450,
-
-  /** The count itself, and the beat GO holds for before the board is handed over. */
-  COUNTDOWN_MS: 3000,
-  GO_MS: 500,
 
   /** Where "Rip & Tear" drops the player. */
   RIP_AND_TEAR_STAGE: 30,
+};
+
+/**
+ * The briefings — the one thing that still opens a stage with a panel.
+ *
+ * A mechanic that can end a run without ever having been named gets exactly one modal, on
+ * the stage it arrives, and never again. There are two, because there are two things the
+ * board cannot say for itself: that a clock is running, and that the black rope is a
+ * multiplier rather than only an obstacle.
+ *
+ * Keyed by the stage the thing *appears on* rather than the one before it — the cursed rope
+ * is on the board behind the panel while you read about it, which is worth more than a
+ * warning about something you cannot yet see.
+ *
+ * The values name a card in index.html, which is where the prose lives. Seen ones are
+ * remembered in progress (`briefed`), so a briefing costs a player one dismissal for the
+ * life of their record; `restart` is what puts them back.
+ */
+export const BRIEFING = {
+  /** stage -> card. CURSED.FROM rather than a literal 16, so the two cannot drift apart. */
+  STAGES: { 1: 'clock', [CURSED.FROM]: 'cursed' },
+
+  /**
+   * Rip & Tear's answer for itself. Deliberately outside STAGES and deliberately not
+   * remembered: it is not an explanation, it is the button being rude back, and it belongs
+   * to the button rather than to the stage it happens to drop you on.
+   */
+  RIP_AND_TEAR: 'riptear',
 };
 
 export const SCORING = {

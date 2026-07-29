@@ -38,17 +38,26 @@ export class Hud {
       settings: $('overlay-settings'),
 
       interlude: $('overlay-interlude'),
-      cardCleared: $('card-cleared'),
-      cardCountdown: $('card-countdown'),
       clearedStage: $('cleared-stage'),
       clearedScore: $('cleared-score'),
       clearedTotal: $('cleared-total'),
-      countdownStage: $('countdown-stage'),
-      countdownValue: $('countdown-value'),
-      countdownTaunt: $('countdown-taunt'),
+      timer: $('interlude-timer'),
       pause: $('btn-pause'),
       pauseLabel: $('pause-label'),
       skip: $('btn-skip'),
+
+      briefing: $('overlay-briefing'),
+      briefStage: $('brief-stage'),
+      briefClockLimit: $('brief-clock-limit'),
+      briefClockTimed: $('brief-clock-timed'),
+      briefClockUntimed: $('brief-clock-untimed'),
+      // Keyed by BRIEFING's card names, which is the whole mapping from config to markup —
+      // a key with no card here simply never opens, rather than throwing mid-stage-load.
+      briefs: {
+        clock: $('brief-clock'),
+        cursed: $('brief-cursed'),
+        riptear: $('brief-riptear'),
+      },
 
       overStage: $('over-stage'),
       overReason: $('over-reason'),
@@ -61,7 +70,11 @@ export class Hud {
     $('btn-start').addEventListener('click', () => handlers.onStart());
     $('btn-riptear').addEventListener('click', () => handlers.onRipAndTear());
     $('btn-pause').addEventListener('click', () => handlers.onPause());
-    $('btn-skip').addEventListener('click', () => handlers.onSkip());
+    // Both green buttons are the same door: whatever is between the player and the board —
+    // the CLEARED hold or a briefing — this is the way past it. The game decides which,
+    // because it is the only thing that knows which one is up.
+    $('btn-skip').addEventListener('click', () => handlers.onPlayStage());
+    $('btn-brief-play').addEventListener('click', () => handlers.onPlayStage());
     $('btn-over-retry').addEventListener('click', () => handlers.onGameOverRetry());
     $('btn-restart').addEventListener('click', () => handlers.onRestart());
     // Same gated handler as the hotkey, for the same reason: rerolling the stage costs the
@@ -83,11 +96,12 @@ export class Hud {
       // Gated on game state (no dialog, no drag in flight) and ignores auto-repeat.
       if (e.key === 'r' && !e.repeat) handlers.onRestartStage();
 
-      // Enter skips the wait between stages. Stood down while a button has focus, because
-      // Enter already activates a focused button — hijacking it there would fire both, so
-      // tabbing to PAUSE and pressing Enter would pause and skip in the same keystroke.
+      // Enter is the way past whatever is between the player and the board. Stood down
+      // while a button has focus, because Enter already activates a focused button —
+      // hijacking it there would fire both, so tabbing to PAUSE and pressing Enter would
+      // pause and start the stage in the same keystroke.
       if (e.key === 'Enter' && !e.repeat && document.activeElement?.tagName !== 'BUTTON') {
-        handlers.onSkip();
+        handlers.onPlayStage();
       }
     });
   }
@@ -286,47 +300,68 @@ export class Hud {
     this.el.title.classList.add('is-hidden');
   }
 
-  /**
-   * The card that says you cleared it, and what it paid. Holds, then gets swiped off by
-   * showCountdown.
-   */
+  /** The card that says you cleared it, and what it paid. Holds, then the next board. */
   showCleared({ stage, score, total }) {
     this.el.clearedStage.textContent = String(stage);
     this.el.clearedScore.textContent = formatScore(score);
     this.el.clearedTotal.textContent = formatScore(total);
     this.el.interlude.classList.remove('is-hidden');
-    this.#showCard(this.el.cardCleared);
-    this.#hideCard(this.el.cardCountdown);
   }
 
   /**
-   * The countdown card.
+   * The hold, as a level rather than a number: 1 is the card's full beat, 0 is up.
    *
-   * If the cleared card is up this is a swap, and the two animate as a pair — one out to
-   * the left, one in from the right. Coming from the title or a retry there is nothing to
-   * replace, so it simply arrives.
+   * The wash behind the text drains with it. Written every frame while the card is up, so
+   * it is guarded like everything else here: the same transform written sixty times a
+   * second is sixty style recalculations for one picture.
    */
-  showCountdown(stage, taunt = false) {
-    this.el.countdownStage.textContent = String(stage);
-    this.el.countdownTaunt.classList.toggle('is-hidden', !taunt);
-    this.el.interlude.classList.remove('is-hidden');
-
-    const swapping = !this.el.cardCleared.classList.contains('is-hidden');
-    if (swapping) {
-      this.el.cardCleared.classList.remove('is-entering');
-      this.el.cardCleared.classList.add('is-leaving');
-    }
-    this.#showCard(this.el.cardCountdown, swapping);
+  setCountdown(fraction) {
+    const scale = Math.max(0, Math.min(1, fraction)).toFixed(3);
+    if (this.last.countdown === scale) return;
+    this.el.timer.style.transform = `scaleY(${scale})`;
+    this.last.countdown = scale;
   }
 
+  /**
+   * A briefing: the panel that explains a mechanic on the stage it arrives, once.
+   *
+   * `limit` is the stage's deadline in ms, or null for a stage nobody has ever cleared. It
+   * decides which of the clock card's two answers is up, and there genuinely are two —
+   * announcing a time limit on an untimed board would be a lie, and a briefing that lies
+   * about the clock is worse than no briefing.
+   *
+   * Those fields are written whichever card is opening. They live inside the clock card, so
+   * writing them while the cursed one is up puts text into something nobody can see, which
+   * is cheaper than a branch that has to be kept in step with the markup.
+   */
+  showBriefing(key, { stage, limit = null } = {}) {
+    const card = this.el.briefs[key];
+    if (!card) return false;
 
-  /** The number itself, or GO. Written every frame while the count runs. */
-  setCountdown(text) {
-    if (this.last.countdown === text) return;
-    this.el.countdownValue.textContent = text;
-    // GO is the payoff, and it wants to land rather than merely appear.
-    this.el.countdownValue.classList.toggle('is-go', text === 'GO');
-    this.last.countdown = text;
+    for (const el of Object.values(this.el.briefs)) {
+      el.classList.toggle('is-hidden', el !== card);
+    }
+
+    const timed = typeof limit === 'number' && Number.isFinite(limit);
+    this.el.briefStage.textContent = String(stage);
+    // Whole seconds: this is a briefing about a clock, not a clock, and the tenths the
+    // readout drops to are urgency rather than information.
+    this.el.briefClockLimit.textContent = formatClock(timed ? limit : Infinity, {
+      tenths: false,
+    });
+    this.el.briefClockTimed.classList.toggle('is-hidden', !timed);
+    this.el.briefClockUntimed.classList.toggle('is-hidden', timed);
+
+    this.el.briefing.classList.remove('is-hidden');
+    return true;
+  }
+
+  hideBriefing() {
+    this.el.briefing.classList.add('is-hidden');
+  }
+
+  get briefingOpen() {
+    return !this.el.briefing.classList.contains('is-hidden');
   }
 
   /**
@@ -354,24 +389,6 @@ export class Hud {
 
   hideInterlude() {
     this.el.interlude.classList.add('is-hidden');
-    this.#hideCard(this.el.cardCleared);
-    this.#hideCard(this.el.cardCountdown);
-  }
-
-  /**
-   * Restarting a CSS animation needs the class dropped and the style flushed; without the
-   * reflow read the browser coalesces both writes and the card arrives already in place.
-   */
-  #showCard(card, entering = false) {
-    card.classList.remove('is-hidden', 'is-leaving', 'is-entering');
-    if (!entering) return;
-    void card.offsetWidth;
-    card.classList.add('is-entering');
-  }
-
-  #hideCard(card) {
-    card.classList.add('is-hidden');
-    card.classList.remove('is-leaving', 'is-entering');
   }
 
   /**
@@ -411,8 +428,12 @@ export class Hud {
 
   /** True while anything is covering the board — input and hotkeys must stand down. */
   get anyOverlayOpen() {
-    return [this.el.settings, this.el.interlude, this.el.gameover, this.el.title].some(
-      (el) => !el.classList.contains('is-hidden'),
-    );
+    return [
+      this.el.settings,
+      this.el.interlude,
+      this.el.briefing,
+      this.el.gameover,
+      this.el.title,
+    ].some((el) => !el.classList.contains('is-hidden'));
   }
 }

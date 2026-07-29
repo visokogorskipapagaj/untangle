@@ -1,15 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { INTERLUDE } from '../src/config.js';
+import { BRIEFING, CURSED, INTERLUDE } from '../src/config.js';
 import { Game } from '../src/game.js';
 
 /**
- * The sequence between stages: a CLEARED card, a swipe, a countdown, GO, and the board.
+ * Getting into a stage and out of one: the CLEARED card, the briefings, and the handover.
  *
  * These drive a real Game against the real generator, because the thing under test is the
  * handover itself — when the next board is built, when the clock is allowed to start, and
- * what the player is allowed to touch while a card is up.
+ * what the player is allowed to touch while a panel is up.
  */
 
 const WIDTH = 1600;
@@ -18,25 +18,32 @@ const HEIGHT = 900;
 function stubHud() {
   return {
     calls: [],
+    /** How full the hold reads, 1 down to 0 — the bar behind the CLEARED card. */
     countdown: null,
     paused: null,
+    briefing: null,
     hideGameOver() {},
     hideTitle() {},
     showCleared(info) {
       this.cleared = info;
       this.calls.push(['cleared', info.stage]);
     },
-    showCountdown(stage, taunt) {
-      this.calls.push(['countdown', stage, taunt]);
-    },
-    setCountdown(text) {
-      this.countdown = text;
+    setCountdown(level) {
+      this.countdown = level;
     },
     setPaused(paused) {
       this.paused = paused;
     },
     hideInterlude() {
       this.calls.push(['hidden']);
+    },
+    showBriefing(key, info) {
+      this.briefing = { key, ...info };
+      this.calls.push(['briefing', key, info.stage]);
+      return true;
+    },
+    hideBriefing() {
+      this.briefing = null;
     },
     showGameOver(s) {
       this.calls.push(['gameover', s]);
@@ -51,11 +58,21 @@ function stubHud() {
   };
 }
 
-function makeGame() {
+function makeGame(progress = {}) {
   const game = new Game({
     renderer: { resize() {}, draw() {} },
     hud: stubHud(),
-    progress: { maxStage: 1, total: 0, best: {}, times: {}, options: {} },
+    progress: {
+      maxStage: 1,
+      total: 0,
+      best: {},
+      times: {},
+      options: {},
+      // Every briefing already seen unless a test says otherwise: the flow tests are about
+      // the handover, and a panel opening in the middle of one is a different subject.
+      briefed: { clock: true, cursed: true },
+      ...progress,
+    },
     baseSeed: 7,
     debug: false,
   });
@@ -72,88 +89,169 @@ function advance(game, ms, step = 16) {
 }
 
 /**
- * Runs the sequence out until the board is playable.
+ * Runs the hold out until the next board is playable.
  *
- * Waits on the state rather than on the sum of the phase lengths: a phase transition
- * drops whatever fraction of a frame it overshot by, so counting the milliseconds lands a
- * few short and leaves the test one tick inside GO.
+ * Waits on the state rather than on the length of the hold: the transition drops whatever
+ * fraction of a frame it overshot by, so counting the milliseconds lands a tick short.
  */
-function countIn(game) {
+function playOn(game) {
   for (let guard = 0; game.state !== 'playing' && guard < 800; guard++) game.update(16, 0);
-  assert.equal(game.state, 'playing', 'the countdown should have handed the board over');
-}
-
-/** Steps until the sequence leaves `phase`, for the same reason as countIn. */
-function untilPhaseEnds(game, phase) {
-  assert.equal(game.interlude?.phase, phase, `expected to be in the ${phase} phase`);
-  for (let guard = 0; game.interlude?.phase === phase && guard < 800; guard++) {
-    game.update(16, 0);
-  }
+  assert.equal(game.state, 'playing', 'the hold should have handed the board over');
 }
 
 const kinds = (hud) => hud.calls.map((call) => call[0]);
 
+/** Where the bar has got to. It is a fraction of the hold, so the last bit is not the point. */
+function assertLevel(actual, expected, message) {
+  assert.ok(
+    Math.abs(actual - expected) < 0.005,
+    `${message} — expected the bar at about ${expected}, got ${actual}`,
+  );
+}
+
 // --- entering a stage --------------------------------------------------------------
 
-test('starting a run counts you in rather than dropping you on the board', () => {
+test('starting a run drops you straight on the board', () => {
   const game = makeGame();
   game.start(1);
 
-  assert.equal(game.state, 'intro');
-  assert.deepEqual(game.hud.calls, [['countdown', 1, false]]);
-  assert.equal(game.hud.countdown, '3.00', 'and it opens on the full count');
-  assert.equal(game.interlude.phase, 'countdown');
-});
-
-test('the count runs down, lands on GO, and then hands the board over', () => {
-  const game = makeGame();
-  game.start(1);
-
-  advance(game, 1000);
-  assert.equal(game.hud.countdown, '2.00');
-  assert.equal(game.state, 'intro', 'still not playable');
-
-  advance(game, 1500);
-  assert.equal(game.hud.countdown, '0.50');
-
-  advance(game, 500);
-  assert.equal(game.hud.countdown, 'GO');
-  assert.equal(game.state, 'intro', 'GO is a beat of its own, not the handover');
-
-  advance(game, INTERLUDE.GO_MS + 100);
-  assert.equal(game.state, 'playing');
+  assert.equal(game.state, 'playing', 'no count, no card — the stage is simply yours');
   assert.equal(game.interlude, null);
-  assert.ok(kinds(game.hud).includes('hidden'), 'and the overlay is taken down');
+  assert.equal(game.briefing, null);
 });
 
-test('nothing on the board can be touched until the count finishes', () => {
+test('the board is live from the first frame, and so is the clock', () => {
   const game = makeGame();
   game.start(1);
 
   const node = game.ropes[0].nodes[0];
-  assert.equal(game.onGrab(node.x, node.y, false), false, 'not during the count');
+  assert.equal(game.onGrab(node.x, node.y, false), true, 'grabbable at once');
 
-  countIn(game);
-  assert.equal(game.onGrab(node.x, node.y, false), true, 'and immediately after it');
+  game.onRelease();
+  advance(game, 500);
+  assert.ok(game.clock.elapsed > 0, 'and timed from the moment it was handed over');
 });
 
-test('the stage clock does not start until the board does', () => {
-  const game = makeGame();
-  // Stage 1 has no record, so it loads untimed; elapsed is the thing being watched here.
+// --- briefings ----------------------------------------------------------------------
+
+test('stage 1 opens with the clock briefing, and the board waits behind it', () => {
+  const game = makeGame({ briefed: {} });
   game.start(1);
 
-  advance(game, INTERLUDE.COUNTDOWN_MS + INTERLUDE.GO_MS - 100);
-  assert.equal(game.clock.elapsed, 0, 'the count is not the player\'s time');
+  assert.equal(game.briefing, 'clock');
+  assert.equal(game.state, 'intro', 'built, but not yet the player\'s');
+  assert.deepEqual(game.hud.calls.at(-1), ['briefing', 'clock', 1]);
 
-  advance(game, 2000);
-  assert.ok(game.clock.elapsed > 0, 'and it runs once the board is theirs');
+  const node = game.ropes[0].nodes[0];
+  assert.equal(game.onGrab(node.x, node.y, false), false, 'nothing to touch through it');
+
+  advance(game, 5000);
+  assert.equal(game.clock.elapsed, 0, 'reading it is not the player\'s time');
+  assert.equal(game.state, 'intro', 'and it does not time itself out');
+});
+
+test('the briefing hands the board over, and the clock starts there', () => {
+  const game = makeGame({ briefed: {} });
+  game.start(1);
+  advance(game, 3000);
+
+  game.playStage();
+
+  assert.equal(game.state, 'playing');
+  assert.equal(game.briefing, null);
+  assert.equal(game.hud.briefing, null, 'and the panel really came down');
+
+  advance(game, 500);
+  assert.ok(game.clock.elapsed > 0, 'running from the moment it closed');
+  assert.ok(game.clock.elapsed <= 600, 'without back-charging the time spent reading');
+});
+
+test('the clock briefing is told the stage deadline, so it can quote it', () => {
+  // The panel says how long you have got, and there are two answers: a number, or nothing
+  // at all on a stage nobody has ever cleared. The game is the only thing that knows which.
+  const untimed = makeGame({ briefed: {} });
+  untimed.start(1);
+  assert.equal(untimed.hud.briefing.limit, null, 'no record, no deadline to quote');
+
+  const timed = makeGame({ briefed: {}, times: { 1: [20000, 21000, 22000] } });
+  timed.start(1);
+  assert.ok(timed.hud.briefing.limit > 0, 'and a real one once there is one');
+  assert.equal(timed.hud.briefing.limit, timed.clock.limit, 'the same one the stage runs on');
+});
+
+test('a briefing is shown once and then never again', () => {
+  const game = makeGame({ briefed: {} });
+  game.start(1);
+  game.playStage();
+  assert.equal(game.progress.briefed.clock, true, 'filed the moment it went up');
+
+  game.retryStage();
+  assert.equal(game.briefing, null, 'a retry does not re-explain the clock');
+  assert.equal(game.state, 'playing');
+
+  game.start(1);
+  assert.equal(game.briefing, null, 'and neither does a whole new run');
+});
+
+test('the cursed briefing lands on the stage the black rope arrives, not before', () => {
+  const game = makeGame({ briefed: { clock: true } });
+
+  game.start(CURSED.FROM - 1);
+  assert.equal(game.briefing, null, 'nothing to warn about yet');
+
+  game.start(CURSED.FROM);
+  assert.equal(game.briefing, 'cursed');
+  assert.deepEqual(game.hud.calls.at(-1), ['briefing', 'cursed', CURSED.FROM]);
+  assert.ok(
+    game.ropes.some((rope) => rope.cursed),
+    'and the rope it is about is on the board behind it',
+  );
+});
+
+test('clearing into a briefing takes the CLEARED card down with it', () => {
+  // Two panels, and only one of them may be up: the card is a live overlay until something
+  // hides it, and a briefing opening on top would leave the last stage's score behind it.
+  const game = makeGame({ briefed: { clock: true } });
+  game.start(CURSED.FROM - 1);
+  forceSolve(game);
+  assert.equal(game.state, 'cleared');
+
+  advance(game, INTERLUDE.CLEARED_MS + 50);
+
+  assert.equal(game.stage, CURSED.FROM);
+  assert.equal(game.briefing, 'cursed');
+  assert.equal(game.interlude, null, 'the hold is over');
+  assert.ok(kinds(game.hud).includes('hidden'), 'and its card was taken down');
+});
+
+test('a briefing with no card behind it hands the board over rather than freezing it', () => {
+  // The stage -> card map is config and the cards are markup, and nothing joins them at
+  // runtime. If they ever part company the stage must still start.
+  const game = makeGame({ briefed: {} });
+  game.hud.showBriefing = () => false;
+
+  game.start(1);
+
+  assert.equal(game.state, 'playing');
+  assert.equal(game.briefing, null, 'nothing is waiting on a panel that never opened');
+});
+
+test('restarting from the settings panel puts the briefings back', () => {
+  const game = makeGame({ briefed: { clock: true, cursed: true } });
+  game.hud.hideSettings = () => {};
+
+  game.restart();
+
+  assert.equal(game.briefing, 'clock', 'stage 1 explains itself again');
+  assert.deepEqual(game.progress.briefed, { clock: true }, 'and the rest are owed again');
 });
 
 // --- pausing ------------------------------------------------------------------------
 
-test('PAUSE holds the count, and the same button lets it go', () => {
+test('PAUSE holds the CLEARED card, and the same button lets it go', () => {
   const game = makeGame();
-  game.start(1);
+  game.start(2);
+  forceSolve(game);
   advance(game, 1000);
 
   game.togglePause();
@@ -161,154 +259,129 @@ test('PAUSE holds the count, and the same button lets it go', () => {
   assert.equal(game.hud.paused, true);
 
   advance(game, 30000);
-  assert.equal(game.hud.countdown, '2.00', 'the count did not move');
-  assert.equal(game.state, 'intro', 'and the stage did not start without them');
+  assertLevel(game.hud.countdown, 2 / 3, 'the hold did not move');
+  assert.equal(game.stage, 2, 'and the next stage did not load itself');
 
   game.togglePause();
   assert.equal(game.hud.paused, false);
-  countIn(game);
+  playOn(game);
+  assert.equal(game.stage, 3);
 });
 
 test('pause does nothing while a stage is actually being played', () => {
   const game = makeGame();
   game.start(1);
-  countIn(game);
 
   game.togglePause();
-  assert.equal(game.paused, false, 'there is no sequence to hold');
+  assert.equal(game.paused, false, 'there is no card to hold');
+});
+
+test('a stage cannot begin already held', () => {
+  const game = makeGame();
+  game.start(2);
+  forceSolve(game);
+  game.togglePause();
+  assert.equal(game.paused, true);
+
+  game.playStage();
+
+  assert.equal(game.state, 'playing');
+  assert.equal(game.paused, false);
+  assert.equal(game.hud.paused, false, 'and the button says so');
 });
 
 // --- clearing a stage ---------------------------------------------------------------
 
-test('a cleared stage holds its card, then swipes into the next stage counting in', () => {
+test('a cleared stage holds its card, then hands over the next board', () => {
   const game = makeGame();
   game.start(4);
-  countIn(game);
 
   game.progress.times = {};
   forceSolve(game);
   assert.equal(game.state, 'cleared');
   assert.deepEqual(game.hud.calls.at(-1), ['cleared', 4]);
 
-  // The card holds for its full beat before anything moves.
+  // The card holds for its full beat before anything moves, and the bar behind it says how
+  // long that beat has left rather than leaving the player to guess at it.
   advance(game, INTERLUDE.CLEARED_MS - 100);
   assert.equal(game.stage, 4, 'the next board is not built early');
-  assert.deepEqual(game.hud.calls.at(-1), ['cleared', 4]);
+  assert.equal(game.state, 'cleared', 'and the board is not handed over early either');
+  assertLevel(game.hud.countdown, 100 / INTERLUDE.CLEARED_MS, 'the hold drains as it goes');
 
   advance(game, 200);
-  assert.equal(game.stage, 5, 'the next board is built under the swipe');
-  assert.deepEqual(game.hud.calls.at(-1), ['countdown', 5, false]);
-  assert.equal(game.interlude.phase, 'swipe');
-  assert.equal(game.hud.countdown, '3.00', 'showing the full count while it slides');
-
-  // Counting only starts once the card has arrived — the whole swipe is spent on 3.00.
-  untilPhaseEnds(game, 'swipe');
-  assert.equal(game.interlude.phase, 'countdown');
-  assert.equal(game.hud.countdown, '3.00', 'the count had not started under the swipe');
-
-  advance(game, 1000);
-  assert.equal(game.hud.countdown, '2.00');
-
-  countIn(game);
-  assert.equal(game.stage, 5);
+  assert.equal(game.stage, 5, 'the next board is built when the hold ends');
+  assert.equal(game.state, 'playing', 'and it is playable straight away');
+  assert.equal(game.hud.countdown, 0, 'the bar is spent rather than nearly spent');
+  assert.ok(kinds(game.hud).includes('hidden'), 'and the card came down');
 });
 
-// --- skipping the count -----------------------------------------------------------------
-
-test('skip hands the board over at once, and it is the same handover', () => {
+test('the next stage is not charged for the card in front of it', () => {
   const game = makeGame();
-  game.start(1);
-  assert.equal(game.interlude.phase, 'countdown');
+  game.start(2);
+  forceSolve(game);
 
-  game.skipInterlude();
+  advance(game, INTERLUDE.CLEARED_MS - 100);
+  assert.equal(game.clock.elapsed, 0, 'the hold is not the player\'s time');
 
-  assert.equal(game.state, 'playing');
-  assert.equal(game.interlude, null, 'no phase left running behind the board');
-  assert.ok(kinds(game.hud).includes('hidden'), 'and the overlay really came down');
-
-  // Not a thinner door: the board is live and the clock is on it, exactly as after GO.
-  const node = game.ropes[0].nodes[0];
-  assert.equal(game.onGrab(node.x, node.y, false), true);
+  playOn(game);
+  advance(game, 400);
+  assert.ok(game.clock.elapsed > 0, 'and the clock runs once the board is theirs');
+  assert.ok(game.clock.elapsed <= 500, 'from zero, not from partway through the hold');
 });
 
-test('skipping does not start the clock any earlier than the board', () => {
-  const game = makeGame();
-  game.start(1);
-  advance(game, 1000);
-  assert.equal(game.clock.elapsed, 0, 'nothing charged during the count');
+// --- playing on early ---------------------------------------------------------------
 
-  game.skipInterlude();
-  advance(game, 500);
-  assert.ok(game.clock.elapsed > 0, 'and it runs from the moment the board is handed over');
-  assert.ok(game.clock.elapsed <= 600, 'without back-charging the count that was skipped');
-});
-
-test('skip on the CLEARED card builds the next board rather than jumping over it', () => {
-  // The card is the one phase carrying work rather than just time: loadStage(stage + 1)
-  // runs when it *ends*. Skipping past that would hand back the stage just solved, already
-  // clear, with a clock running on nothing to do.
+test('the green button ends the hold at once, and it is the same handover', () => {
   const game = makeGame();
   game.start(4);
-  countIn(game);
   forceSolve(game);
-  assert.equal(game.interlude.phase, 'cleared');
   assert.equal(game.stage, 4, 'the next board does not exist yet');
 
-  game.skipInterlude();
+  game.playStage();
 
   assert.equal(game.state, 'playing');
   assert.equal(game.stage, 5, 'the next board was built on the way through');
   assert.ok(game.tracker.count > 0, 'and it is a real puzzle, not the solved one');
-  assert.equal(game.interlude, null);
+  assert.equal(game.interlude, null, 'nothing left running behind the board');
+  assert.ok(kinds(game.hud).includes('hidden'), 'and the overlay really came down');
+
+  // Not a thinner door: the board is live and the clock is on it, exactly as after the hold.
+  const node = game.ropes.find((rope) => !rope.removed).nodes[0];
+  assert.equal(game.onGrab(node.x, node.y, false), true);
 });
 
-test('skipping the CLEARED card keeps everything that card was reporting', () => {
+test('cutting the card short keeps everything it was reporting', () => {
   // Safe only because the solve banks before the card ever goes up. If that order ever
   // flips, cutting the card short starts costing the player the stage they just won.
   const game = makeGame();
   game.start(3);
-  countIn(game);
   forceSolve(game);
 
   const banked = game.progress.best['3'];
   const shown = game.hud.cleared;
   assert.ok(banked > 0, 'sanity: the stage scored something');
 
-  game.skipInterlude();
+  game.playStage();
 
-  assert.equal(game.progress.best['3'], banked, 'the best survives the skip');
+  assert.equal(game.progress.best['3'], banked, 'the best survives it');
   assert.equal(game.progress.maxStage >= 3, true);
   assert.equal(shown.score, banked, 'and the card had been told the same number');
 });
 
-test('skipping a held countdown lets the run go rather than starting it paused', () => {
+test('the green button does nothing when there is nothing to get past', () => {
   const game = makeGame();
-  game.start(1);
-  game.togglePause();
-  assert.equal(game.paused, true);
-
-  game.skipInterlude();
-
-  assert.equal(game.state, 'playing');
-  assert.equal(game.paused, false, 'a stage cannot begin already held');
-  assert.equal(game.hud.paused, false, 'and the button says so');
-});
-
-test('skip does nothing when there is no sequence to skip', () => {
-  const game = makeGame();
-  game.skipInterlude();
+  game.playStage();
   assert.equal(game.state, 'title', 'not a way past the title screen');
 
   game.start(1);
-  countIn(game);
-  game.skipInterlude();
+  game.playStage();
   assert.equal(game.state, 'playing', 'and a no-op mid-stage');
+  assert.equal(game.stage, 1, 'it certainly does not skip a stage');
 });
 
 test('a cleared stage is still banked, it is just not read out', () => {
   const game = makeGame();
   game.start(3);
-  countIn(game);
   advance(game, 8000);
   forceSolve(game);
 
@@ -327,11 +400,10 @@ test('a cleared stage is still banked, it is just not read out', () => {
 test('the run total on the card accumulates across stages', () => {
   const game = makeGame();
   game.start(2);
-  countIn(game);
   forceSolve(game);
   const first = game.hud.cleared;
 
-  countIn(game); // through the swipe and the next count, into stage 3
+  playOn(game); // through the hold, into stage 3
   forceSolve(game);
   const second = game.hud.cleared;
 
@@ -343,22 +415,6 @@ test('the run total on the card accumulates across stages', () => {
   );
 });
 
-test('the run can be held between stages too', () => {
-  const game = makeGame();
-  game.start(2);
-  countIn(game);
-  forceSolve(game);
-
-  game.togglePause();
-  advance(game, 60000);
-  assert.equal(game.stage, 2, 'the next stage did not load itself');
-  assert.equal(game.state, 'cleared');
-
-  game.togglePause();
-  countIn(game);
-  assert.equal(game.stage, 3);
-});
-
 // --- Rip & Tear -----------------------------------------------------------------------
 
 test('Rip & Tear drops the player straight into stage 30, and says something about it', () => {
@@ -366,36 +422,51 @@ test('Rip & Tear drops the player straight into stage 30, and says something abo
   game.ripAndTear();
 
   assert.equal(game.stage, INTERLUDE.RIP_AND_TEAR_STAGE);
-  assert.deepEqual(game.hud.calls, [['countdown', INTERLUDE.RIP_AND_TEAR_STAGE, true]]);
+  assert.deepEqual(game.hud.calls.at(-1), [
+    'briefing',
+    BRIEFING.RIP_AND_TEAR,
+    INTERLUDE.RIP_AND_TEAR_STAGE,
+  ]);
+  assert.ok(!kinds(game.hud).includes('cleared'), 'and no card in front of it');
+});
+
+test('Rip & Tear says it every time — it is the button\'s answer, not a lesson', () => {
+  const game = makeGame();
+  game.ripAndTear();
+  game.playStage();
+  assert.equal(
+    game.progress.briefed[BRIEFING.RIP_AND_TEAR],
+    undefined,
+    'and nothing about it is filed away',
+  );
+
+  game.ripAndTear();
+  assert.equal(game.briefing, BRIEFING.RIP_AND_TEAR);
 });
 
 test('the taunt is Rip & Tear\'s alone and does not follow you to stage 31', () => {
   const game = makeGame();
   game.ripAndTear();
-  countIn(game);
+  game.playStage();
   forceSolve(game);
   advance(game, INTERLUDE.CLEARED_MS + 50);
 
-  assert.deepEqual(game.hud.calls.at(-1), ['countdown', 31, false]);
-});
-
-test('an ordinary start carries no taunt', () => {
-  const game = makeGame();
-  game.start(1);
-  assert.equal(game.hud.calls[0][2], false);
+  assert.equal(game.stage, 31);
+  assert.equal(game.briefing, null);
+  assert.equal(game.state, 'playing');
 });
 
 // --- retrying -------------------------------------------------------------------------
 
-test('a retry counts you back in on the same stage', () => {
+test('a retry hands the same stage straight back', () => {
   const game = makeGame();
   game.start(6);
-  countIn(game);
+  advance(game, 2000);
 
   game.retryStage();
   assert.equal(game.stage, 6);
-  assert.equal(game.state, 'intro');
-  assert.deepEqual(game.hud.calls.at(-1), ['countdown', 6, false]);
+  assert.equal(game.state, 'playing');
+  assert.equal(game.clock.elapsed, 0, 'on a fresh clock');
 });
 
 /**
