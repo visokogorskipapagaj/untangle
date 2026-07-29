@@ -1,0 +1,3 @@
+# The pooled clear times are runtime state, not source. A checked-in pool would ship one
+# machine's playerbase to every clone and quietly become everybody's starting par.
+server/data/

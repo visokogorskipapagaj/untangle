@@ -2,6 +2,7 @@ import { STAGE } from './config.js';
 import { Game } from './game.js';
 import { Hud } from './hud.js';
 import { attachInput } from './input.js';
+import { Pool } from './pool.js';
 import { loadProgress } from './progress.js';
 import { Renderer } from './render.js';
 
@@ -41,10 +42,23 @@ const canvas = document.getElementById('canvas');
 const renderer = new Renderer(canvas);
 const progress = loadProgress();
 
+/**
+ * The shared pool. Constructing it hydrates the cached par table from localStorage, so the
+ * first board already has one; sync() refreshes it and drains any times stranded by a
+ * previous offline session, and is pointedly not awaited — nothing below needs it, and a
+ * dead server would otherwise hold up the title screen.
+ *
+ * `?pool=0` plays off this device's own times alone, which is also what happens whenever
+ * the server cannot be reached.
+ */
+const pool = params.get('pool') === '0' ? null : new Pool();
+pool?.sync().catch(() => {});
+
 const hud = new Hud({
   onStart: () => game.start(1),
   onRipAndTear: () => game.ripAndTear(),
   onPause: () => game.togglePause(),
+  onSkip: () => game.skipInterlude(),
   onGameOverRetry: () => game.retryAfterGameOver(),
   onRestart: () => game.restart(),
   onOptions: (options) => game.setOptions(options),
@@ -56,7 +70,7 @@ const hud = new Hud({
 });
 hud.setOptions(progress.options);
 
-const game = new Game({ renderer, hud, progress, baseSeed, debug, phone });
+const game = new Game({ renderer, hud, progress, pool, baseSeed, debug, phone });
 
 attachInput(canvas, {
   onGrab: (x, y, isTouch) => game.onGrab(x, y, isTouch),
@@ -98,8 +112,9 @@ if (debug) {
   );
 }
 
-// Debug handles. Poke at a live stage from the browser console — `__game.chain = 9`,
+// Debug handles. Poke at a live stage from the browser console — `__game.combo.chain = 9`,
 // `__game.budget.bank = 20`, `__game.start(16)` — and they are what lets a headless
 // harness drive the real objects rather than a re-implementation of them.
 globalThis.__game = game;
 globalThis.__hud = hud;
+globalThis.__pool = pool;

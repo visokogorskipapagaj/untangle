@@ -267,11 +267,21 @@ html, body {
   background: var(--warn);
 }
 .stat--bank.is-burning::before { opacity: 0; }
+
+/* Full, so spare moves are being thrown away rather than carried. A dimmed label and an
+   outline, not a colour alarm: this is a nudge to spend, and the box beside it uses colour
+   for the state that actually costs a run. */
+.stat--bank.is-full {
+  box-shadow: inset 0 0 0 1px rgba(138, 180, 255, 0.45);
+}
+.stat--bank.is-full .stat__label { color: #8ab4ff; }
 .stat--bank.is-burning .stat__label,
 .stat--bank.is-burning .stat__value { color: #fff; }
 
 .icon-btn {
   pointer-events: auto;
+  display: grid;
+  place-items: center;
   margin-left: 12px;
   width: 34px;
   height: 34px;
@@ -281,6 +291,13 @@ html, body {
   color: var(--muted);
   font-size: 16px;
   cursor: pointer;
+}
+/* Deliberately not forced white like the interlude buttons: these sit over the board all
+   run, and the muted-until-hovered treatment is what keeps them from competing with it.
+   currentColor means the icon follows that on its own. */
+.icon-btn svg {
+  width: 17px;
+  height: 17px;
 }
 .icon-btn:hover { color: var(--ink); border-color: rgba(232, 236, 244, 0.3); }
 /* Icon buttons sit as a pair, closer to each other than to the stats they follow. */
@@ -353,13 +370,43 @@ html, body {
   width: min(460px, 100%);
 }
 
-/* Below the cards and outside the stack, so it holds still while they swipe past. The
-   width is pinned because the label swaps between two lengths, and a button that resizes
-   under the cursor is one you can end up clicking twice. */
-.interlude__pause {
+/* Below the cards and outside the stack, so they hold still while the cards swipe past. */
+.interlude__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   pointer-events: auto;
-  min-width: 168px;
 }
+
+/* The interlude's two controls, sized to sit alongside the HUD's icon buttons rather than
+   inventing a second button shape: same 34px box and same 17px icon. They keep their
+   labels — pause and skip are the only two controls on screen between stages, and a bare
+   pair of glyphs there is a guess rather than a choice.
+
+   Qualified with `.btn` on purpose. `.btn` sets `padding: 11px 22px` for a text label and
+   is declared further down this file, so an unqualified rule up here loses the tie on
+   equal specificity — and at `box-sizing: border-box` that padding fights the fixed
+   height. */
+.btn.interlude__pause,
+.btn.interlude__skip {
+  height: 34px;
+  padding: 0 14px;
+  /* The icons paint with currentColor, so this is what makes them white. --ink is a touch
+     off-white, which is right for a body of text and a shade dim for a lone glyph. */
+  color: #fff;
+}
+.interlude__pause svg,
+.interlude__skip svg {
+  width: 17px;
+  height: 17px;
+}
+
+/* One button, two icons, and the overlay's own `is-paused` decides which. Keeping both in
+   the DOM is what lets the label live in a span instead of in the button's text — see
+   Hud.setPaused, which would otherwise have to rebuild the icon on every toggle. */
+.interlude__pause .icon-play { display: none; }
+.overlay--interlude.is-paused .interlude__pause .icon-pause { display: none; }
+.overlay--interlude.is-paused .interlude__pause .icon-play { display: block; }
 
 /* One cell, both cards. They overlap only while swapping, and the cell staying as big as
    the largest card is what stops the panel resizing under the swap — which is also why the
@@ -480,6 +527,24 @@ html, body {
   transition: background 0.15s, border-color 0.15s;
 }
 .btn:hover { background: rgba(232, 236, 244, 0.07); }
+
+/* A button that leads with an icon and keeps its label. "Retry stage" and "Restart from
+   stage 1" carry the same reload icon and mean quite different things — one replays the
+   board, the other throws the run away — so the icon decorates the label rather than
+   replacing it. The interlude's pause and skip are the icon-only case; they sit together
+   in a fixed spot, where position carries the meaning a label would. */
+.btn--icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.btn--icon svg {
+  width: 16px;
+  height: 16px;
+  /* Never squeezed by a long label — the icon is a fixed thing beside flexible text. */
+  flex: none;
+}
 .btn--primary {
   background: var(--accent);
   border-color: var(--accent);

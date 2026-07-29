@@ -122,8 +122,14 @@ export const MOVES = {
    * `ideal` is the true minimum — the fewest ropes that must be relocated so nothing
    * crosses — scaled by this. At 1.0 par would be perfect play and the bonus moves
    * would be the player's entire margin for error.
+   *
+   * Note that this is a *proportional* margin on a cover that grows all run: at 1.15 a
+   * late stage handed out four spare moves a stage where an early one handed out one, so
+   * the surplus arrived fastest exactly where the boards were supposed to bite. Trimmed
+   * to 1.10, which is the same grant on small boards — ceil() swallows the difference
+   * below about ten — and one move tighter on the large ones.
    */
-  SLACK: 1.15,
+  SLACK: 1.1,
 
   /**
    * One extra move per this many knots; 0 disables the bonus.
@@ -139,6 +145,22 @@ export const MOVES = {
 
   /** Backup moves a run starts with, so stage 1 is not a knife-edge. */
   STARTING_BANK: 3,
+
+  /**
+   * Hard ceiling on banked moves. Spare moves above it are simply lost.
+   *
+   * The bank is meant to be a cushion, not savings. Left uncapped it compounds — a clean
+   * run reached 37 by stage 20 and was still climbing, which is more spare moves than any
+   * single stage costs, so the budget stopped being a constraint somewhere in the teens
+   * and every stage after that was played with a net under it.
+   *
+   * A cap on its own would pin every player to the ceiling and make the readout say the
+   * same thing about all of them; it is the tighter SLACK above that keeps the number
+   * meaning something. Together a clean run sits at the cap, a slightly loose one hovers
+   * near 3, and a wasteful one lives at zero — which is the bank reporting how the run is
+   * actually going rather than how long it has been.
+   */
+  BANK_MAX: 6,
 
   /** Warn the player when the stage budget drops to this. */
   LOW_WARNING: 2,
@@ -313,7 +335,18 @@ export const COMBO = {
    * It cannot be started cold: with no run going there is nothing to multiply. Building a
    * normal run and then turning it onto the curse is the whole strategy.
    */
-  CURSED_BASE: 2,
+  /**
+   * The lowest cursed multiplier that can exist, and therefore the first named rung.
+   *
+   * Not a threshold anyone chose — it is arithmetic. `#advance` opens the multiplier at
+   * `1 + cursedStep(weight)`, and cursedStep is `1 + max(1, weight)`, so the smallest
+   * value the game can ever produce is 3. This was 2 for a long time, which was harmless
+   * in that `>= 2` and `>= 3` agree on every reachable value, but it described a rung that
+   * could not happen and left NAMES[2] as content no player could ever see.
+   *
+   * Anything that changes cursedStep has to come back here.
+   */
+  CURSED_BASE: 3,
   /**
    * How much faster the window burns while the curse is on. At a flat double the run had
    * to be built at a sprint on top of already costing double to drag, which is pressure on
@@ -342,9 +375,12 @@ export const COMBO = {
    * keeps the last name.
    */
   NAMES: [
+    // 0-2 are unreachable and stay in the array as blanks rather than being removed: the
+    // list is indexed *by the multiplier*, so dropping a slot would slide every name down
+    // one and quietly rename every rung above it. See CURSED_BASE for why 2 cannot happen.
     '',
     '',
-    'DOUBLE',
+    '',
     'TRIPLE',
     'QUADRUPLE',
     'PENTAKILL!',
@@ -355,6 +391,32 @@ export const COMBO = {
     'M-M-M-MONSTER DEKNOTTER',
   ],
 };
+
+/**
+ * Where the combo indicator sits, in CSS px from the top of the viewport.
+ *
+ * Shared because the renderer and the game both need it and they need the *same* one: the
+ * renderer draws the running total, and the game aims flying knot scores at it so they
+ * land in the number they are filling.
+ *
+ * This used to be three literals in two files with an arithmetic relationship nothing
+ * enforced — an origin and an offset in render.js, and a copy of their sum in game.js.
+ * Moving either of the first two silently sent every knot score to a point the total was
+ * no longer at, and nothing would have failed.
+ */
+export const COMBO_HUD = {
+  /** The indicator's origin, which is also the label line. */
+  ORIGIN_Y: 100,
+  /** The running total, offset down from the origin. */
+  TOTAL_DY: 28,
+  /** The ladder name, under the total and on cursed runs only. */
+  NAME_DY: 58,
+  /** The payout banner that replaces the indicator when a run ends. */
+  BANNER_Y: 118,
+};
+
+/** Absolute y of the running total: the one point knot scores fly into. Never hand-written. */
+export const COMBO_TOTAL_Y = COMBO_HUD.ORIGIN_Y + COMBO_HUD.TOTAL_DY;
 
 /**
  * The stage clock.
@@ -420,6 +482,107 @@ export const CLOCK = {
   /** Readout thresholds: amber, then red and counting in tenths. */
   WARN_MS: 10000,
   CRITICAL_MS: 5000,
+
+  /**
+   * Whether a stage nobody in the pool has ever cleared runs untimed.
+   *
+   * This used to be unconditional and per-player, and it was the rule that let a countdown
+   * sit on a puzzle without ever timing somebody out of a board they had never seen. Once
+   * the pool answers for a stage that protection is gone by construction: a new player's
+   * very first board already has thousands of other people's times behind it. The rule
+   * survives only for stages the pool itself has no record of.
+   *
+   * Set true to restore the old behaviour — your own first clear of each stage untimed,
+   * pool or no pool.
+   */
+  UNTIMED_FIRST_CLEAR: false,
+
+  /**
+   * Never set a pooled deadline tighter than the player's own fastest clear of the stage.
+   *
+   * The model used to need no floor: every deadline was the mean of runs this player had
+   * really completed, so the tightest one reachable was a time they had already proved. A
+   * pooled mean can describe a stage this particular player cannot clear, and that is not
+   * a hypothetical — it is what "calibrated to the playerbase" means for anybody below its
+   * middle. This puts the old invariant back as an explicit guard rather than a property
+   * of the data, and it can only ever loosen a deadline.
+   *
+   * It does nothing on a stage the player has never cleared, which is exactly the case it
+   * cannot help with. Set false for an unguarded pool.
+   */
+  OWN_FLOOR: true,
+};
+
+/**
+ * The shared pool.
+ *
+ * Times are aggregated across everyone who plays rather than kept to the device that
+ * recorded them, so the pressure is calibrated to the playerbase. The client never blocks
+ * on it: the whole par table arrives in one request at boot and is cached, so a stage load
+ * is as synchronous as it ever was and a dead server is indistinguishable from a slow one
+ * — both fall back to the player's own history.
+ */
+export const POOL = {
+  /** Same origin by default. Point this at the API host to serve the game from a CDN. */
+  BASE_URL: '',
+
+  /** localStorage keys for the cached par table and the unsent-times outbox. */
+  CACHE_KEY: 'untangle.pool.v1',
+  OUTBOX_KEY: 'untangle.outbox.v1',
+
+  /**
+   * How long a cached par table is used before a refresh is attempted. The table only
+   * moves as fast as the playerbase's aggregate does, which is to say barely — this is
+   * about not hammering the server on every reload, not about freshness.
+   */
+  MAX_AGE_MS: 6 * 60 * 60 * 1000,
+
+  /**
+   * Unsent clear times held while offline, oldest dropped first.
+   *
+   * Bounded because this is a nicety: a player who plays a hundred stages on a plane
+   * contributes the last few and no more. Losing the rest costs the pool nothing.
+   */
+  OUTBOX_MAX: 50,
+
+  /** Give up on a request after this long and use what is cached. */
+  TIMEOUT_MS: 5000,
+
+  /**
+   * Samples kept per stage on the server, oldest out first.
+   *
+   * Large enough that the trimmed mean is stable and the late-game percentile has real
+   * runs behind it, small enough that the whole store stays a file worth rewriting. Note
+   * this is the *pool's* window, not CLOCK.KEEP, which stays the per-player one.
+   */
+  SERVER_KEEP: 500,
+
+  /** Stages the API will accept a time for at all. Anything else is a forged payload. */
+  MAX_STAGE: 500,
+
+  /**
+   * Hard bounds on a submitted time, before any statistics see it.
+   *
+   * The trim and the clamp both need a plausible pool to work against, so they cannot be
+   * what defends the pool when it is empty. These can: a stage cleared in under a second
+   * did not happen, and one that took an hour was a tab left open.
+   */
+  MIN_MS: 1000,
+  MAX_MS: 60 * 60 * 1000,
+
+  /** Requests accepted per IP per window, and the window. Reads and writes share it. */
+  RATE_LIMIT: 60,
+  RATE_WINDOW_MS: 60 * 1000,
+
+  /**
+   * How long a client or proxy may reuse a par table, in seconds.
+   *
+   * The table moves at the speed of an aggregate over hundreds of runs, which is to say
+   * barely, so this costs nothing in freshness and takes the repeated-read load off the
+   * server entirely. It has to stay well under the client's own MAX_AGE_MS, which is the
+   * real refresh interval — this only governs the hop in between.
+   */
+  PARS_MAX_AGE_S: 300,
 };
 
 /**

@@ -213,6 +213,98 @@ test('a cleared stage holds its card, then swipes into the next stage counting i
   assert.equal(game.stage, 5);
 });
 
+// --- skipping the count -----------------------------------------------------------------
+
+test('skip hands the board over at once, and it is the same handover', () => {
+  const game = makeGame();
+  game.start(1);
+  assert.equal(game.interlude.phase, 'countdown');
+
+  game.skipInterlude();
+
+  assert.equal(game.state, 'playing');
+  assert.equal(game.interlude, null, 'no phase left running behind the board');
+  assert.ok(kinds(game.hud).includes('hidden'), 'and the overlay really came down');
+
+  // Not a thinner door: the board is live and the clock is on it, exactly as after GO.
+  const node = game.ropes[0].nodes[0];
+  assert.equal(game.onGrab(node.x, node.y, false), true);
+});
+
+test('skipping does not start the clock any earlier than the board', () => {
+  const game = makeGame();
+  game.start(1);
+  advance(game, 1000);
+  assert.equal(game.clock.elapsed, 0, 'nothing charged during the count');
+
+  game.skipInterlude();
+  advance(game, 500);
+  assert.ok(game.clock.elapsed > 0, 'and it runs from the moment the board is handed over');
+  assert.ok(game.clock.elapsed <= 600, 'without back-charging the count that was skipped');
+});
+
+test('skip on the CLEARED card builds the next board rather than jumping over it', () => {
+  // The card is the one phase carrying work rather than just time: loadStage(stage + 1)
+  // runs when it *ends*. Skipping past that would hand back the stage just solved, already
+  // clear, with a clock running on nothing to do.
+  const game = makeGame();
+  game.start(4);
+  countIn(game);
+  forceSolve(game);
+  assert.equal(game.interlude.phase, 'cleared');
+  assert.equal(game.stage, 4, 'the next board does not exist yet');
+
+  game.skipInterlude();
+
+  assert.equal(game.state, 'playing');
+  assert.equal(game.stage, 5, 'the next board was built on the way through');
+  assert.ok(game.tracker.count > 0, 'and it is a real puzzle, not the solved one');
+  assert.equal(game.interlude, null);
+});
+
+test('skipping the CLEARED card keeps everything that card was reporting', () => {
+  // Safe only because the solve banks before the card ever goes up. If that order ever
+  // flips, cutting the card short starts costing the player the stage they just won.
+  const game = makeGame();
+  game.start(3);
+  countIn(game);
+  forceSolve(game);
+
+  const banked = game.progress.best['3'];
+  const shown = game.hud.cleared;
+  assert.ok(banked > 0, 'sanity: the stage scored something');
+
+  game.skipInterlude();
+
+  assert.equal(game.progress.best['3'], banked, 'the best survives the skip');
+  assert.equal(game.progress.maxStage >= 3, true);
+  assert.equal(shown.score, banked, 'and the card had been told the same number');
+});
+
+test('skipping a held countdown lets the run go rather than starting it paused', () => {
+  const game = makeGame();
+  game.start(1);
+  game.togglePause();
+  assert.equal(game.paused, true);
+
+  game.skipInterlude();
+
+  assert.equal(game.state, 'playing');
+  assert.equal(game.paused, false, 'a stage cannot begin already held');
+  assert.equal(game.hud.paused, false, 'and the button says so');
+});
+
+test('skip does nothing when there is no sequence to skip', () => {
+  const game = makeGame();
+  game.skipInterlude();
+  assert.equal(game.state, 'title', 'not a way past the title screen');
+
+  game.start(1);
+  countIn(game);
+  game.skipInterlude();
+  assert.equal(game.state, 'playing', 'and a no-op mid-stage');
+});
+
 test('a cleared stage is still banked, it is just not read out', () => {
   const game = makeGame();
   game.start(3);

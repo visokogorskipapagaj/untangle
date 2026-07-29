@@ -3,25 +3,33 @@ import { CLOCK } from './config.js';
 /**
  * The stage clock, and the model that decides how long it runs for.
  *
- * Nothing here estimates how long a board *should* take. The only input is a list of times
- * the player actually finished this stage in, so a stage with no record has no deadline —
- * the first clear of every stage is untimed, and the clock is doing nothing but measuring.
- * Every attempt after that is measured against their own past runs.
+ * Nothing here estimates how long a board *should* take. The only input is times somebody
+ * really finished this stage in — the shared pool's when it has any, and failing that the
+ * times on this device. A stage nobody has ever cleared still has no deadline.
  *
- * The whole model is three steps:
+ * The whole model is three steps, and they are the same three whichever source answers:
  *
  *   trim     throw the extreme runs off both ends, so one interrupted run and one freak
  *            fast one cannot move the number.
- *   strike   past par, remove the slowest surviving runs — one more per stage — so the
- *            average being aimed at slides from "a typical run" toward "your best run".
+ *   strike   past par, aim at a smaller and smaller slice of the fastest surviving runs,
+ *            so the average slides from "a typical run" toward "a very good one".
  *   slack    multiply by the margin for the stage: SLACK_START early, nothing at par.
  *
- * There is deliberately no floor, no prior and no notion of board size. Every deadline is
- * the mean of runs this player really completed, so the tightest one reachable is a time
- * they have already proved they can hit. A model built only from measurements cannot
- * describe an impossible stage, which is exactly why it does not need protecting from one.
+ * The strike step is expressed two ways for one reason. Against a personal history it is a
+ * count — one more run struck per stage past par — which is a real 1/KEEP tightening on a
+ * twenty-sample window. Against a pool of hundreds that same count would be noise, so the
+ * pooled path uses the fraction that count *means* (see poolFraction) and gets an identical
+ * curve at any sample size. Change one and you must change the other.
  *
- * Everything except StageClock is pure, and `history` is read-only outside recordClear.
+ * What the pool cost us: the model used to need no floor, because every deadline was the
+ * mean of runs this player really completed and the tightest one reachable was therefore a
+ * time they had already proved they could hit. A model built only from your own
+ * measurements cannot describe a stage you personally cannot clear. A pooled one can, and
+ * for everybody below the playerbase's middle it routinely will. CLOCK.OWN_FLOOR puts that
+ * invariant back deliberately instead of getting it for free.
+ *
+ * Everything except StageClock is pure. `history` and `pool` are read-only outside
+ * recordClear, which only ever touches the former.
  */
 
 /** A stage's recorded times, fastest first. Sorting is what every step below assumes. */
@@ -82,6 +90,24 @@ export function slowestStruck(stage) {
 }
 
 /**
+ * The same curve as slowestStruck, as a fraction of the runs available.
+ *
+ * Striking one run per stage off a personal history means something because the history is
+ * CLOCK.KEEP long: at stage PAR+5 it is aiming at the fastest 15 of 20, three quarters. Off
+ * a pool of five hundred the identical rule would strike five and aim at 99% of them, and
+ * the entire late game would quietly stop existing. So the pooled path asks what fraction
+ * the count *represents* on a full personal window and applies that instead — same shape,
+ * same endpoint, independent of how many runs happen to be in the sample.
+ *
+ * The floor of one KEEP-th is where the personal model ends too: the last run standing.
+ * Past that stage the target stops tightening for both.
+ */
+export function poolFraction(stage) {
+  const struck = slowestStruck(stage);
+  return Math.max(1 / CLOCK.KEEP, 1 - struck / CLOCK.KEEP);
+}
+
+/**
  * The runs a stage's deadline is actually averaged over, fastest first.
  *
  * Exported because it is the honest answer to "where did that number come from" — the
@@ -103,15 +129,69 @@ export function expectedTime(stage, history) {
 }
 
 /**
+ * The pool's runs for a stage, fastest first, after trim and the late-game slice.
+ *
+ * Exported for the same reason runsCounted is: it is the honest answer to where a pooled
+ * number came from, and it is what the tests assert against.
+ */
+export function pooledRuns(stage, pool) {
+  const trimmed = trimEnds(samplesFor(pool, stage));
+  if (!trimmed.length) return [];
+  // Ceiling, not floor: a two-sample pool at the tightest stage should aim at its faster
+  // run, not at nothing. Never below one for the same reason runsCounted never strikes
+  // its last survivor.
+  const keep = Math.max(1, Math.ceil(trimmed.length * poolFraction(stage)));
+  return trimmed.slice(0, keep);
+}
+
+/**
+ * What the playerbase typically needs for this stage, before the margin is applied.
+ *
+ * This runs on the server, over the raw pool, and its answer is what ships to the client
+ * as that stage's par. The alternative — sending the samples and letting every client do
+ * this — is a couple of hundred kilobytes of numbers to compute one, and the slice depends
+ * only on the stage, so there is nothing per-player to wait for.
+ */
+export function pooledTime(stage, pool) {
+  const runs = pooledRuns(stage, pool);
+  return runs.length ? mean(runs) : null;
+}
+
+/** A stage's par out of the table the server sends, or null if it has none. */
+function parFor(pars, stage) {
+  const ms = pars?.[String(stage)];
+  return typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? ms : null;
+}
+
+/**
  * How long this attempt gets, in ms, or null for no limit.
  *
- * Null is not a failure case — it is the first clear of every stage, and the reason a
- * countdown can sit on a puzzle at all without ever timing the player out of one they
- * have never seen.
+ * `pars` is the server's table, stage -> expected ms, already trimmed and sliced by
+ * pooledTime. It answers when it has anything to say; the device's own history is what is
+ * left when it does not, which covers a dead server, a first load offline, and a stage
+ * further out than anyone has reached. Both are real measurements, so neither is a
+ * fallback in the sense of being worse — they are the same model over different
+ * populations.
+ *
+ * Null is not a failure case. It is a stage nobody has ever cleared, and it is the reason
+ * a countdown can sit on a genuinely new puzzle without timing anyone out of it.
  */
-export function stageDeadline(stage, history = {}) {
-  const expected = expectedTime(stage, history);
-  return expected === null ? null : expected * slackFor(stage);
+export function stageDeadline(stage, history = {}, pars = {}) {
+  const own = expectedTime(stage, history);
+  const pooled = CLOCK.UNTIMED_FIRST_CLEAR && own === null ? null : parFor(pars, stage);
+
+  const expected = pooled ?? own;
+  if (expected === null) return null;
+
+  const deadline = expected * slackFor(stage);
+  if (!CLOCK.OWN_FLOOR || pooled === null) return deadline;
+
+  // samplesFor sorts fastest first, so [0] is the best this player has ever done on this
+  // stage. A pooled deadline is allowed to be anything down to that and no tighter: they
+  // have already proved that time once. Nothing to do if they never have — which is the
+  // case the floor cannot rescue, and the price of a pooled model.
+  const best = samplesFor(history, stage)[0];
+  return best ? Math.max(deadline, best) : deadline;
 }
 
 /**
@@ -125,8 +205,14 @@ export function stageDeadline(stage, history = {}) {
  * against and is taken as it stands.
  *
  * Mutates `history` in place and returns the time that was stored.
+ *
+ * `keep` is a parameter because the server files into the shared pool with exactly this
+ * function and a much longer window (POOL.SERVER_KEEP). The clamp is the reason to share
+ * it rather than write a second copy: it is the only thing standing between the pool and
+ * one forged submission, and a divergent second implementation of it is precisely the bug
+ * nobody would notice until the pool was already poisoned.
  */
-export function recordClear(history, stage, ms) {
+export function recordClear(history, stage, ms, keep = CLOCK.KEEP) {
   const key = String(stage);
   const samples = history[key] || (history[key] = []);
 
@@ -140,8 +226,8 @@ export function recordClear(history, stage, ms) {
 
   samples.push(time);
   // Oldest out first: the window follows the player rather than averaging in who they
-  // used to be.
-  if (samples.length > CLOCK.KEEP) samples.splice(0, samples.length - CLOCK.KEEP);
+  // used to be. On the server it follows the playerbase for the same reason.
+  if (samples.length > keep) samples.splice(0, samples.length - keep);
   return time;
 }
 

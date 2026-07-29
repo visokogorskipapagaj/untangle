@@ -1,4 +1,4 @@
-import { ROPE } from './config.js';
+import { COMBO, COMBO_HUD, ROPE } from './config.js';
 import { clamp } from './geometry.js';
 
 /**
@@ -7,8 +7,11 @@ import { clamp } from './geometry.js';
  * The live indicator and the payout occupy the same place and never show at once: while a
  * run is going it is the knot count and the running total, and the instant it ends the
  * payout replaces it there. Two separate callouts meant the same number appeared twice.
+ *
+ * The geometry lives in config so the game can aim flying knot scores at the same total
+ * this draws — see COMBO_HUD.
  */
-const COMBO_ANCHOR_Y = 118;
+const { ORIGIN_Y, TOTAL_DY, NAME_DY, BANNER_Y } = COMBO_HUD;
 
 /** Height of the hop the cursed readout takes each time the multiplier climbs. */
 const CURSED_HOP_PX = 11;
@@ -210,7 +213,7 @@ export class Renderer {
     const knots = state.chain || 0;
     if (knots < (state.comboShowFrom || 2)) return;
 
-    const cursed = (state.cursedMult || 0) >= 2;
+    const cursed = (state.cursedMult || 0) >= COMBO.CURSED_BASE;
     const time = state.time;
     const hot = knots >= 7;
 
@@ -223,7 +226,7 @@ export class Renderer {
       // so the jitter never settles into a rhythm the eye can tune out and stop reading.
       const shakeX = Math.sin(time * 0.058) * 3.6 + Math.sin(time * 0.131) * 2.1;
       const shakeY = Math.cos(time * 0.073) * 2.7 + Math.sin(time * 0.167) * 1.3;
-      ctx.translate(this.width / 2 + shakeX, 100 + shakeY);
+      ctx.translate(this.width / 2 + shakeX, ORIGIN_Y + shakeY);
 
       // Huffing and puffing: a slow breath swelling and collapsing underneath the jitter,
       // an order of magnitude slower so it reads as strain rather than more noise.
@@ -231,7 +234,7 @@ export class Renderer {
       ctx.scale(breath, breath);
       ctx.rotate(Math.sin(time * 0.049) * 0.04);
     } else {
-      ctx.translate(this.width / 2, 100);
+      ctx.translate(this.width / 2, ORIGIN_Y);
     }
 
     // The label: how many knots this run has taken, and what the curse is multiplying it
@@ -258,7 +261,7 @@ export class Renderer {
     ctx.font = '800 34px ui-monospace, SFMono-Regular, Menlo, monospace';
     ctx.fillStyle = cursed ? '#ff6a4d' : hot ? '#ffd166' : '#e8ecf4';
     ctx.shadowBlur = cursed ? 22 : hot ? 16 : 0;
-    ctx.fillText(Math.round(state.comboValue || 0).toLocaleString(), 0, 28);
+    ctx.fillText(Math.round(state.comboValue || 0).toLocaleString(), 0, TOTAL_DY);
 
     // The ladder name for the cursed multiplier — the number in the label above. It sits
     // *under* the total rather than above it: the label slot is spent on the multiplier
@@ -268,7 +271,7 @@ export class Renderer {
       ctx.font = '700 13px ui-sans-serif, system-ui, sans-serif';
       ctx.fillStyle = '#ffb4a6';
       ctx.shadowBlur = 12;
-      this.#struck(state.cursedPop, 58, () => ctx.fillText(state.comboName, 0, 58));
+      this.#struck(state.cursedPop, NAME_DY, () => ctx.fillText(state.comboName, 0, NAME_DY));
     }
 
     ctx.restore();
@@ -381,7 +384,7 @@ export class Renderer {
       ctx.translate(
         this.width / 2 + Math.sin(t * 118) * 12 * shake,
         // Quadratic drop, so it accelerates away like it fell rather than slid.
-        COMBO_ANCHOR_Y + fall * fall * this.height * 0.75,
+        BANNER_Y + fall * fall * this.height * 0.75,
       );
       ctx.rotate(Math.sin(t * 96) * 0.055 * shake + fall * 0.45);
     } else {
@@ -389,7 +392,7 @@ export class Renderer {
       // Overshoot then settle, so the callout punches in rather than easing in.
       const pop = 1 + 0.18 * Math.exp(-t * 14) * Math.cos(t * 34);
       ctx.globalAlpha = Math.max(0, t > 0.7 ? 1 - (t - 0.7) / 0.3 : 1);
-      ctx.translate(this.width / 2, COMBO_ANCHOR_Y - rise * 14);
+      ctx.translate(this.width / 2, BANNER_Y - rise * 14);
       ctx.scale(pop, pop);
     }
 

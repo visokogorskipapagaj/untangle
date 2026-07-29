@@ -92,6 +92,68 @@ test('leftover moves compound across stages', () => {
   assert.equal(budget.bank, 5);
 });
 
+test('the bank stops compounding at the cap', () => {
+  // Left uncapped this is the whole problem: a clean player banks a few spare moves every
+  // stage, and by the teens carries more spare moves than any one stage costs.
+  const budget = new MoveBudget();
+  budget.bank = 0;
+
+  for (let stage = 0; stage < 12; stage++) {
+    budget.beginStage(5, 0);
+    budget.spend();
+    budget.spend();
+    budget.settleStage(); // +3 a stage, twelve times over
+  }
+  assert.equal(budget.bank, MOVES.BANK_MAX);
+});
+
+test('the carry reports what the stage was worth, not what the bank could take', () => {
+  // The bank is full, so this carry goes nowhere — but it is still what the stage earned,
+  // and the readout would be lying if it said zero.
+  const budget = new MoveBudget();
+  budget.bank = MOVES.BANK_MAX;
+  budget.beginStage(5, 0);
+  budget.spend();
+
+  assert.equal(budget.settleStage(), 4, 'four moves spare');
+  assert.equal(budget.bank, MOVES.BANK_MAX, 'and nowhere to put them');
+});
+
+test('a move earned at a full bank is lost, not deferred', () => {
+  // Deferring it would mean the reward reappearing a stage later out of nowhere, or the
+  // next settle silently clawing it back. Neither reads as a rule.
+  const budget = new MoveBudget();
+  budget.bank = MOVES.BANK_MAX;
+
+  budget.grant(1);
+  assert.equal(budget.bank, MOVES.BANK_MAX);
+  assert.equal(budget.bankFull, true);
+
+  budget.beginStage(4, 0);
+  for (let i = 0; i < 4; i++) budget.spend();
+  budget.settleStage();
+  assert.equal(budget.bank, MOVES.BANK_MAX, 'and it does not come back later');
+});
+
+test('bankFull tracks the cap, and the cap cannot be written around', () => {
+  const budget = new MoveBudget();
+  budget.bank = 0;
+  assert.equal(budget.bankFull, false);
+
+  budget.bank = 999;
+  assert.equal(budget.bank, MOVES.BANK_MAX, 'assignment is clamped like everything else');
+  assert.equal(budget.bankFull, true);
+
+  budget.bank = -5;
+  assert.equal(budget.bank, 0);
+});
+
+test('the starting cushion fits inside the cap', () => {
+  // A run that began over its own ceiling would lose moves on the first settle for no
+  // reason the player could see.
+  assert.ok(MOVES.STARTING_BANK <= MOVES.BANK_MAX);
+});
+
 test('game over clears the bank, a fresh run restores the cushion', () => {
   const budget = new MoveBudget();
   budget.bank = 9;

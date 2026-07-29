@@ -47,7 +47,13 @@
           <span class="stat__label">Score</span>
           <span class="stat__value" id="stat-score">0</span>
         </div>
-        <button id="btn-restart-stage" class="icon-btn" type="button" aria-label="Restart stage" title="Restart stage (R)">&#8635;</button>
+        <button id="btn-restart-stage" class="icon-btn" type="button"
+                aria-label="Restart stage" title="Restart stage (R)">
+          <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+            <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd"
+                  d="M1.973312 7.999978666666666c0 -3.0244266666666664 2.3571306666666665 -6.026666666666667 6.026666666666667 -6.026666666666667C10.963519999999999 1.973312 12.428266666666667 4.166826666666667 13.052480000000001 5.333333333333333H11.2c-0.2945066666666667 0 -0.5333333333333333 0.238784 -0.5333333333333333 0.5333333333333333s0.23882666666666666 0.5333333333333333 0.5333333333333333 0.5333333333333333h3.2c0.2945066666666667 0 0.5333333333333333 -0.238784 0.5333333333333333 -0.5333333333333333v-3.2c0 -0.29454933333333333 -0.23882666666666666 -0.5333333333333333 -0.5333333333333333 -0.5333333333333333s-0.5333333333333333 0.238784 -0.5333333333333333 0.5333333333333333v1.9340586666666666C13.1152 3.2760106666666666 11.37696 0.9066410666666666 7.999978666666666 0.9066410666666666 3.666304 0.9066410666666666 0.9066410666666666 4.464394666666666 0.9066410666666666 7.999978666666666c0 3.535594666666667 2.7596629333333333 7.0933546666666665 7.0933376 7.0933546666666665 2.0734293333333333 0 3.799701333333333 -0.82048 5.028821333333333 -2.07104 0.6581333333333333 -0.6696533333333333 1.1720533333333334 -1.4606933333333332 1.5224533333333334 -2.3122133333333332 0.11210666666666666 -0.2723626666666667 -0.017813333333333334 -0.5840533333333333 -0.29013333333333335 -0.6961493333333333 -0.2724266666666667 -0.11210666666666666 -0.5841066666666667 0.017834666666666665 -0.6962133333333332 0.2902186666666666 -0.29952 0.7278506666666666 -0.7381333333333333 1.401984 -1.2968533333333334 1.9704106666666665 -1.0365866666666665 1.0548266666666666 -2.4920106666666664 1.7521066666666667 -4.268074666666666 1.7521066666666667 -3.669536 0 -6.026666666666667 -3.00224 -6.026666666666667 -6.026687999999999Z"/>
+          </svg>
+        </button>
         <button id="btn-settings" class="icon-btn" type="button" aria-label="Settings">&#9881;</button>
       </div>
     </header>
@@ -58,17 +64,18 @@
     <div id="overlay-title" class="overlay">
       <div class="panel">
         <h1 class="title">UNTANGLE</h1>
-        <p class="lede">Pick up the ropes. Pull them apart until nothing crosses.<br>
-          Every stage grants a limited number of moves. Spend fewer than you're given and
-          the rest bank for later &mdash; run out of both and the stage is lost.<br>
-          Rip several knots apart in one pull for a combo.<br>
-          A stage you have never cleared is untimed. Clear it and the clock learns your
-          pace &mdash; and from there on it hands back less of it every stage.</p>
+        <p class="lede">There's a pile of rope. It's in knots. Sort it out.<br>
+          You get so many moves and not one more. Come in under and the leftovers go in
+          your pocket; burn through those too and that's the stage, pal.<br>
+          Rip a few knots apart in one go and the game gets excited about it.<br>
+          And there's a clock. Nobody made that number up &mdash; it's how long this stage
+          actually takes people, you included once you've done it. It gives back a little
+          less every stage, because of course it does.</p>
         <div class="row">
           <button id="btn-start" class="btn btn--primary" type="button">Start</button>
           <button id="btn-riptear" class="btn btn--danger" type="button">Rip &amp; Tear</button>
         </div>
-        <p class="hint">Rip &amp; Tear drops you straight into stage 30.</p>
+        <p class="hint">Rip &amp; Tear skips the first 29 stages. Your funeral.</p>
         <p class="hint" id="title-best"></p>
       </div>
     </div>
@@ -85,18 +92,49 @@
             <p class="eyebrow">Stage <span id="cleared-stage">1</span></p>
             <p class="interlude__headline">CLEARED!</p>
             <p class="interlude__points" id="cleared-score">0</p>
-            <p class="interlude__total">Run total <span id="cleared-total">0</span></p>
+            <p class="interlude__total">Running you a total of <span id="cleared-total">0</span></p>
           </div>
           <div class="panel panel--interlude is-hidden" id="card-countdown">
             <p class="eyebrow">Stage</p>
             <p class="interlude__headline" id="countdown-stage">1</p>
             <p class="interlude__count" id="countdown-value">3.00</p>
             <p class="interlude__taunt is-hidden" id="countdown-taunt">
-              So you think you're hot shit, eh? Let's see :)
+              Oh, stage 30 straight off the bat. Big man. Let's see it then.
             </p>
           </div>
         </div>
-        <button id="btn-pause" class="btn btn--ghost interlude__pause" type="button">Pause game</button>
+        <div class="interlude__actions">
+          <!-- Both icons live in the button and the stylesheet shows one, keyed off
+               `is-paused` on the overlay — which the HUD already toggles, so pausing needs
+               no second piece of state. The label is a span of its own because the button's
+               own textContent is those SVGs: writing to it would delete them. -->
+          <button id="btn-pause" class="btn btn--ghost btn--icon interlude__pause" type="button"
+                  title="Pause game">
+            <svg class="icon-pause" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+              <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd"
+                    d="M6.4532799999999995 2.933312c0 -0.324 -0.262656 -0.5866666666666667 -0.5866666666666667 -0.5866666666666667 -0.3240106666666666 0 -0.5866666666666667 0.26266666666666666 -0.5866666666666667 0.5866666666666667V13.066666666666666c0 0.3239466666666667 0.262656 0.5866666666666667 0.5866666666666667 0.5866666666666667 0.3240106666666666 0 0.5866666666666667 -0.26272 0.5866666666666667 -0.5866666666666667V2.933312Zm4.266719999999999 0c0 -0.324 -0.26270933333333335 -0.5866666666666667 -0.58672 -0.5866666666666667 -0.3240106666666666 0 -0.5866666666666667 0.26266666666666666 -0.5866666666666667 0.5866666666666667V13.066666666666666c0 0.3239466666666667 0.262656 0.5866666666666667 0.5866666666666667 0.5866666666666667 0.3240106666666666 0 0.58672 -0.26272 0.58672 -0.5866666666666667V2.933312Z"/>
+            </svg>
+            <svg class="icon-play" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+              <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd"
+                    d="M3.4579413333333333 2.4765973333333333c0.16008533333333333 -0.09652266666666667 0.35901866666666665 -0.10218666666666666 0.5243306666666666 -0.014933333333333333l9.600021333333332 5.066666666666666c0.17493333333333333 0.09232 0.2843733333333333 0.2738773333333333 0.2843733333333333 0.47166933333333333 0 0.19779200000000002 -0.10944 0.3793493333333333 -0.2843733333333333 0.47166933333333333L3.982272 13.538346666666666c-0.16531200000000001 0.08725333333333334 -0.3642453333333333 0.08159999999999999 -0.5243306666666666 -0.014933333333333333C3.2978666666666667 13.426879999999999 3.2 13.253546666666667 3.2 13.066666666666666v-10.133333333333333c0 -0.18692266666666668 0.09786666666666666 -0.36021333333333333 0.25794133333333336 -0.45673600000000003ZM4.266666666666667 3.8178666666666667v8.364213333333334L12.19072 8 4.266666666666667 3.8178666666666667Z"/>
+            </svg>
+            <span id="pause-label">Pause game</span>
+          </button>
+          <!-- Live for the whole sequence, CLEARED card included — skipping that card
+               builds the next board rather than jumping over it, so there is no phase left
+               where the button would be present but inert. -->
+          <button id="btn-skip" class="btn btn--ghost btn--icon interlude__skip" type="button"
+                  aria-label="Skip ahead to the next stage" title="Skip (Enter)">
+            <!-- Radix "Double Arrow Right", verbatim. evenodd is load-bearing: the two
+                 chevrons are subpaths of one path, and the default nonzero rule would
+                 fill the notch between the strokes instead of leaving it open. -->
+            <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+              <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd"
+                    d="M2.289546666666667 11.889493333333332c-0.208288 0.20832 -0.208288 0.5460266666666667 0 0.7543466666666667 0.20827733333333331 0.20821333333333333 0.5459626666666666 0.20821333333333333 0.7542399999999999 0l4.266666666666667 -4.266719999999999c0.208288 -0.20827733333333331 0.208288 -0.5459626666666666 0 -0.7542399999999999l-4.266666666666667 -4.266666666666667c-0.20827733333333331 -0.208288 -0.5459626666666666 -0.208288 -0.7542399999999999 0 -0.208288 0.20827733333333331 -0.208288 0.5459626666666666 0 0.7542399999999999L6.179082666666666 8l-3.889536 3.8894933333333332Zm6.4 0c-0.208288 0.20832 -0.208288 0.5460266666666667 0 0.7543466666666667 0.20827733333333331 0.20821333333333333 0.5459626666666666 0.20821333333333333 0.7542399999999999 0l4.266719999999999 -4.266719999999999c0.20821333333333333 -0.20827733333333331 0.20821333333333333 -0.5459626666666666 0 -0.7542399999999999l-4.266719999999999 -4.266666666666667c-0.20827733333333331 -0.208288 -0.5459626666666666 -0.208288 -0.7542399999999999 0 -0.208288 0.20827733333333331 -0.208288 0.5459626666666666 0 0.7542399999999999L12.579093333333333 8l-3.889546666666667 3.8894933333333332Z"/>
+            </svg>
+            <span>Skip</span>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -107,7 +145,13 @@
         <p class="bigscore bigscore--fail">Stage <span id="over-stage">1</span></p>
         <p class="lede" id="over-detail"></p>
         <div class="row">
-          <button id="btn-over-retry" class="btn btn--primary" type="button">Retry stage</button>
+          <button id="btn-over-retry" class="btn btn--primary btn--icon" type="button">
+            <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+              <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd"
+                    d="M1.973312 7.999978666666666c0 -3.0244266666666664 2.3571306666666665 -6.026666666666667 6.026666666666667 -6.026666666666667C10.963519999999999 1.973312 12.428266666666667 4.166826666666667 13.052480000000001 5.333333333333333H11.2c-0.2945066666666667 0 -0.5333333333333333 0.238784 -0.5333333333333333 0.5333333333333333s0.23882666666666666 0.5333333333333333 0.5333333333333333 0.5333333333333333h3.2c0.2945066666666667 0 0.5333333333333333 -0.238784 0.5333333333333333 -0.5333333333333333v-3.2c0 -0.29454933333333333 -0.23882666666666666 -0.5333333333333333 -0.5333333333333333 -0.5333333333333333s-0.5333333333333333 0.238784 -0.5333333333333333 0.5333333333333333v1.9340586666666666C13.1152 3.2760106666666666 11.37696 0.9066410666666666 7.999978666666666 0.9066410666666666 3.666304 0.9066410666666666 0.9066410666666666 4.464394666666666 0.9066410666666666 7.999978666666666c0 3.535594666666667 2.7596629333333333 7.0933546666666665 7.0933376 7.0933546666666665 2.0734293333333333 0 3.799701333333333 -0.82048 5.028821333333333 -2.07104 0.6581333333333333 -0.6696533333333333 1.1720533333333334 -1.4606933333333332 1.5224533333333334 -2.3122133333333332 0.11210666666666666 -0.2723626666666667 -0.017813333333333334 -0.5840533333333333 -0.29013333333333335 -0.6961493333333333 -0.2724266666666667 -0.11210666666666666 -0.5841066666666667 0.017834666666666665 -0.6962133333333332 0.2902186666666666 -0.29952 0.7278506666666666 -0.7381333333333333 1.401984 -1.2968533333333334 1.9704106666666665 -1.0365866666666665 1.0548266666666666 -2.4920106666666664 1.7521066666666667 -4.268074666666666 1.7521066666666667 -3.669536 0 -6.026666666666667 -3.00224 -6.026666666666667 -6.026687999999999Z"/>
+            </svg>
+            <span>Retry stage</span>
+          </button>
         </div>
       </div>
     </div>
@@ -118,14 +162,20 @@
         <p class="eyebrow">Settings</p>
         <label class="toggle">
           <input type="checkbox" id="opt-distinct">
-          <span>Always-distinct colours<em>Stops rope colours converging on later stages.</em></span>
+          <span>Always-distinct colours<em>Later stages quietly make every rope the same colour. This says no.</em></span>
         </label>
         <label class="toggle">
           <input type="checkbox" id="opt-markers" checked>
-          <span>Show knot markers<em>Pulsing dots on every remaining knot.</em></span>
+          <span>Show knot markers<em>Blinking dots on every knot, so you're not squinting at it.</em></span>
         </label>
         <div class="row">
-          <button id="btn-restart" class="btn" type="button">Restart from stage 1</button>
+          <button id="btn-restart" class="btn btn--icon" type="button">
+            <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+              <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd"
+                    d="M1.973312 7.999978666666666c0 -3.0244266666666664 2.3571306666666665 -6.026666666666667 6.026666666666667 -6.026666666666667C10.963519999999999 1.973312 12.428266666666667 4.166826666666667 13.052480000000001 5.333333333333333H11.2c-0.2945066666666667 0 -0.5333333333333333 0.238784 -0.5333333333333333 0.5333333333333333s0.23882666666666666 0.5333333333333333 0.5333333333333333 0.5333333333333333h3.2c0.2945066666666667 0 0.5333333333333333 -0.238784 0.5333333333333333 -0.5333333333333333v-3.2c0 -0.29454933333333333 -0.23882666666666666 -0.5333333333333333 -0.5333333333333333 -0.5333333333333333s-0.5333333333333333 0.238784 -0.5333333333333333 0.5333333333333333v1.9340586666666666C13.1152 3.2760106666666666 11.37696 0.9066410666666666 7.999978666666666 0.9066410666666666 3.666304 0.9066410666666666 0.9066410666666666 4.464394666666666 0.9066410666666666 7.999978666666666c0 3.535594666666667 2.7596629333333333 7.0933546666666665 7.0933376 7.0933546666666665 2.0734293333333333 0 3.799701333333333 -0.82048 5.028821333333333 -2.07104 0.6581333333333333 -0.6696533333333333 1.1720533333333334 -1.4606933333333332 1.5224533333333334 -2.3122133333333332 0.11210666666666666 -0.2723626666666667 -0.017813333333333334 -0.5840533333333333 -0.29013333333333335 -0.6961493333333333 -0.2724266666666667 -0.11210666666666666 -0.5841066666666667 0.017834666666666665 -0.6962133333333332 0.2902186666666666 -0.29952 0.7278506666666666 -0.7381333333333333 1.401984 -1.2968533333333334 1.9704106666666665 -1.0365866666666665 1.0548266666666666 -2.4920106666666664 1.7521066666666667 -4.268074666666666 1.7521066666666667 -3.669536 0 -6.026666666666667 -3.00224 -6.026666666666667 -6.026687999999999Z"/>
+            </svg>
+            <span>Back to stage 1</span>
+          </button>
           <button id="btn-close-settings" class="btn btn--primary" type="button">Done</button>
         </div>
       </div>

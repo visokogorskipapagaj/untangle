@@ -1,4 +1,4 @@
-import { CLOCK, MOVES } from './config.js';
+import { CLOCK, COMBO, MOVES } from './config.js';
 import { formatClock } from './deadline.js';
 import { formatScore } from './scoring.js';
 
@@ -47,6 +47,8 @@ export class Hud {
       countdownValue: $('countdown-value'),
       countdownTaunt: $('countdown-taunt'),
       pause: $('btn-pause'),
+      pauseLabel: $('pause-label'),
+      skip: $('btn-skip'),
 
       overStage: $('over-stage'),
       overReason: $('over-reason'),
@@ -59,6 +61,7 @@ export class Hud {
     $('btn-start').addEventListener('click', () => handlers.onStart());
     $('btn-riptear').addEventListener('click', () => handlers.onRipAndTear());
     $('btn-pause').addEventListener('click', () => handlers.onPause());
+    $('btn-skip').addEventListener('click', () => handlers.onSkip());
     $('btn-over-retry').addEventListener('click', () => handlers.onGameOverRetry());
     $('btn-restart').addEventListener('click', () => handlers.onRestart());
     // Same gated handler as the hotkey, for the same reason: rerolling the stage costs the
@@ -79,6 +82,13 @@ export class Hud {
       }
       // Gated on game state (no dialog, no drag in flight) and ignores auto-repeat.
       if (e.key === 'r' && !e.repeat) handlers.onRestartStage();
+
+      // Enter skips the wait between stages. Stood down while a button has focus, because
+      // Enter already activates a focused button — hijacking it there would fire both, so
+      // tabbing to PAUSE and pressing Enter would pause and skip in the same keystroke.
+      if (e.key === 'Enter' && !e.repeat && document.activeElement?.tagName !== 'BUTTON') {
+        handlers.onSkip();
+      }
     });
   }
 
@@ -101,6 +111,7 @@ export class Hud {
     movesLeft,
     bank,
     drawingFromBank,
+    bankFull,
     timeLeft,
     score,
     chain,
@@ -162,6 +173,15 @@ export class Hud {
       this.el.bankBox.classList.toggle('is-burning', !!drawingFromBank);
       this.last.drawingFromBank = drawingFromBank;
     }
+
+    // Full: whatever this stage leaves over is lost rather than carried. Quiet, because
+    // it is a nudge to spend rather than a problem, and it must not compete with the
+    // alarm above — burning wins outright, since that one costs the player a run.
+    const full = !!bankFull && !drawingFromBank;
+    if (this.last.bankFull !== full) {
+      this.el.bankBox.classList.toggle('is-full', full);
+      this.last.bankFull = full;
+    }
   }
 
   /**
@@ -169,7 +189,7 @@ export class Hud {
    * chain is live — the bar is hidden the rest of the time, so there is no idle churn.
    */
   #setChainBar(chain = 0, fraction = 0, cursedMult = 0) {
-    const cursed = cursedMult >= 2;
+    const cursed = cursedMult >= COMBO.CURSED_BASE;
     // Live from the *priming* drop, not from x2. The clock starts there, and a running
     // deadline the player cannot see is the one thing this bar exists to prevent — that
     // is a separate question from whether there is a rung worth shouting about yet.
@@ -299,6 +319,7 @@ export class Hud {
     this.#showCard(this.el.cardCountdown, swapping);
   }
 
+
   /** The number itself, or GO. Written every frame while the count runs. */
   setCountdown(text) {
     if (this.last.countdown === text) return;
@@ -308,9 +329,25 @@ export class Hud {
     this.last.countdown = text;
   }
 
+  /**
+   * Flips the pause control between pause and resume.
+   *
+   * The label is written to `aria-label`/`title` rather than to the button's text, because
+   * the button's content is now two inline SVGs and `textContent =` would delete them —
+   * leaving a control that still works, still reads correctly to a screen reader, and is
+   * simply invisible from the first time anyone pauses.
+   *
+   * Which icon shows is the stylesheet's job, keyed off `is-paused` on the overlay. That
+   * class was already being toggled here, so there is no second thing to keep in step.
+   */
   setPaused(paused) {
     if (this.last.paused === paused) return;
-    this.el.pause.textContent = paused ? 'Resume game' : 'Pause game';
+    const label = paused ? 'Resume' : 'Pause';
+    // Into the span, never the button. The button's own content is the two icons, and
+    // `this.el.pause.textContent =` would delete them — leaving a control that still works,
+    // still reads correctly to a screen reader, and is simply invisible from then on.
+    this.el.pauseLabel.textContent = label;
+    this.el.pause.setAttribute('title', label);
     this.el.interlude.classList.toggle('is-paused', paused);
     this.last.paused = paused;
   }
@@ -343,13 +380,16 @@ export class Hud {
    * them should not have to work out which of the two ran out.
    */
   showGameOver({ stage, knots, reason = 'moves' }) {
-    const remaining = `${knots} knot${knots === 1 ? '' : 's'} remaining`;
+    const left = `${knots} knot${knots === 1 ? '' : 's'}`;
     this.el.overStage.textContent = String(stage);
     this.el.overReason.textContent = reason === 'time' ? 'Out of time' : 'Out of moves';
+    // Which of the two ran out, said plainly. The moves counter and the clock sit at
+    // opposite ends of the HUD, and somebody who has just had the board taken off them
+    // should not have to work out which one did it.
     this.el.overDetail.textContent =
       reason === 'time'
-        ? `The clock beat you to it, with ${remaining}.`
-        : `Uh-oh, you ran out of moves with ${remaining}.`;
+        ? `Clock got you. ${left} still sitting there.`
+        : `That's the moves gone, and ${left} to show for it.`;
     this.el.gameover.classList.remove('is-hidden');
   }
 

@@ -35,14 +35,18 @@ function makeDom() {
   const node = (name) => {
     if (nodes.has(name)) return nodes.get(name);
     const classes = new Set();
+    const attrs = new Map();
     const el = {
       name,
       classes,
+      attrs,
       textContent: '',
       style: {},
       offsetWidth: 0,
       checked: false,
       addEventListener() {},
+      setAttribute: (key, value) => attrs.set(key, String(value)),
+      getAttribute: (key) => (attrs.has(key) ? attrs.get(key) : null),
       classList: {
         add: (...c) => c.forEach((x) => classes.add(x)),
         remove: (...c) => c.forEach((x) => classes.delete(x)),
@@ -65,7 +69,15 @@ function makeDom() {
       return node(firstByClass.get(cls));
     },
   };
-  globalThis.window = { addEventListener() {} };
+  // Keydown handlers are captured rather than dropped: the hotkeys are real behaviour, and
+  // the Enter binding in particular has a guard that only shows up when it is exercised.
+  globalThis.keyHandlers = [];
+  globalThis.window = {
+    addEventListener(type, fn) {
+      if (type === 'keydown') globalThis.keyHandlers.push(fn);
+    },
+  };
+  globalThis.document.activeElement = null;
   return node;
 }
 
@@ -121,6 +133,22 @@ test('the bank lights up only while it is being spent', () => {
   assert.equal(box('stat--bank').classList.contains('is-burning'), false);
 });
 
+test('a full bank is marked, so discarded moves are not silent', () => {
+  hud.setStats(stats({ bankFull: true }));
+  assert.equal(box('stat--bank').classList.contains('is-full'), true);
+
+  hud.setStats(stats({ bankFull: false }));
+  assert.equal(box('stat--bank').classList.contains('is-full'), false);
+});
+
+test('burning outranks full — one box cannot say both', () => {
+  // Full is a nudge to spend; burning is about to end the run. If the bank is somehow
+  // both, the one that costs something has to be the one showing.
+  hud.setStats(stats({ bankFull: true, drawingFromBank: true }));
+  assert.equal(box('stat--bank').classList.contains('is-burning'), true);
+  assert.equal(box('stat--bank').classList.contains('is-full'), false);
+});
+
 // --- between stages -------------------------------------------------------------------
 
 test('the cleared card comes up alone, carrying what the stage paid', () => {
@@ -161,6 +189,47 @@ test('a countdown with nothing to replace just arrives', () => {
   assert.equal(el('card-countdown').classList.contains('is-hidden'), false);
 });
 
+test('skip is offered for the whole sequence, including the cleared card', () => {
+  // It used to be hidden outside the countdown, because skipping the CLEARED card would
+  // have handed back the solved board. Skipping now *builds* the next board on the way
+  // through, so there is no phase where the button would be present but inert — and none
+  // where it has to be taken away either.
+  hud.showCleared({ stage: 4, score: 900, total: 900 });
+  assert.equal(el('btn-skip').classList.contains('is-hidden'), false, 'offered on cleared');
+
+  hud.showCountdown(5, false);
+  assert.equal(el('btn-skip').classList.contains('is-hidden'), false, 'and on the count');
+});
+
+test('the skip icon is drawn rather than typed, and takes its colour from the button', () => {
+  // Deliberately says nothing about how many paths the artwork uses — that changed once
+  // already when the icon was swapped, and it was never the thing that mattered. What has
+  // to hold is that it is inline SVG (a codepoint like ⏩ lands as a colour emoji on some
+  // platforms and tofu on others) and that it paints with currentColor, which is the hook
+  // the stylesheet uses to colour it.
+  const from = html.indexOf('id="btn-skip"');
+  const button = html.slice(from, html.indexOf('</button>', from));
+
+  assert.match(button, /<svg[^>]*viewBox="[^"]+"/, 'inline SVG with a viewBox, so it scales');
+  assert.match(button, /fill="currentColor"/, 'the colour comes from the button, not the file');
+  assert.match(button, /aria-label="[^"]+"/, 'an icon-only button still has to say what it is');
+  assert.ok(!/&#\d+;/.test(button), 'and no glyph smuggled in beside it');
+});
+
+test('the skip button out-specifies .btn, or its icon is not centred', () => {
+  // `.btn` sets `padding: 11px 22px` for a text label and is declared after the interlude
+  // block, so a bare `.interlude__skip` rule loses the tie on equal specificity. With
+  // box-sizing: border-box and a fixed width that left a 2px content box for a 20px icon.
+  // Nothing about the result looks like a specificity problem when you are staring at it,
+  // which is exactly why it is worth pinning.
+  assert.match(css, /\.btn\.interlude__skip\s*\{/, 'the padding override must be qualified');
+
+  const rule = css.slice(css.indexOf('.btn.interlude__skip'));
+  const body = rule.slice(rule.indexOf('{'), rule.indexOf('}'));
+  assert.match(body, /padding:\s*0/, 'the text-label padding has to be cleared');
+  assert.match(body, /color:\s*#fff/, 'and the colour set, since the icon inherits it');
+});
+
 test('GO is marked as its own thing, and the number is not', () => {
   hud.setCountdown('2.41');
   assert.equal(el('countdown-value').textContent, '2.41');
@@ -179,14 +248,20 @@ test('the taunt belongs to Rip & Tear and is put away afterwards', () => {
   assert.equal(el('countdown-taunt').classList.contains('is-hidden'), true);
 });
 
-test('pausing renames the button and marks the overlay', () => {
+test('pausing relabels the button and marks the overlay', () => {
   hud.setPaused(true);
-  assert.equal(el('btn-pause').textContent, 'Resume game');
+  assert.equal(el('pause-label').textContent, 'Resume');
+  assert.equal(el('btn-pause').getAttribute('title'), 'Resume', 'and on hover');
   assert.equal(el('overlay-interlude').classList.contains('is-paused'), true);
 
   hud.setPaused(false);
-  assert.equal(el('btn-pause').textContent, 'Pause game');
+  assert.equal(el('pause-label').textContent, 'Pause');
   assert.equal(el('overlay-interlude').classList.contains('is-paused'), false);
+
+  // The button's own content is the two icons, so the label must never be written there.
+  // That is the whole failure mode: `textContent =` deletes them, and the button goes on
+  // working and reading correctly to a screen reader while being invisible on screen.
+  assert.equal(el('btn-pause').textContent, '', 'the label never lands in the button body');
 });
 
 test('hiding the interlude takes both cards down with it', () => {
@@ -214,13 +289,19 @@ test('the interlude counts as an overlay, so input stands down behind it', () =>
 // --- game over --------------------------------------------------------------------------
 
 test('the game-over panel says which of the two ran out', () => {
-  hud.showGameOver({ stage: 9, knots: 2, reason: 'time' });
+  // The wording is free to change; which of the two ran out is not. The moves counter and
+  // the clock sit at opposite ends of the HUD, and the panel is the only thing that says
+  // which one just ended the run.
+  hud.showGameOver({ stage: 12, knots: 3, reason: 'time' });
+  assert.equal(el('over-stage').textContent, '12');
   assert.equal(el('over-reason').textContent, 'Out of time');
-  assert.match(el('over-detail').textContent, /2 knots remaining/);
+  assert.match(el('over-detail').textContent, /3 knots/, 'and how much was left');
+  assert.match(el('over-detail').textContent, /clock/i, 'named as the clock');
 
-  hud.showGameOver({ stage: 9, knots: 1, reason: 'moves' });
+  hud.showGameOver({ stage: 4, knots: 1, reason: 'moves' });
   assert.equal(el('over-reason').textContent, 'Out of moves');
-  assert.match(el('over-detail').textContent, /1 knot remaining/, 'and it counts one knot singly');
+  assert.match(el('over-detail').textContent, /1 knot\b/, 'singular, not "1 knots"');
+  assert.match(el('over-detail').textContent, /moves/i, 'named as the moves');
 });
 
 // --- the stylesheet knows about all of it ------------------------------------------------
@@ -236,4 +317,51 @@ test('every class the HUD toggles has a rule in the stylesheet', () => {
 
   const missing = [...toggled].filter((cls) => !css.includes(`.${cls}`));
   assert.deepEqual(missing, [], `hud.js toggles classes the stylesheet never styles: ${missing}`);
+});
+
+// --- hotkeys ------------------------------------------------------------------------------
+
+/** A HUD whose handler calls are recorded, plus the keydown listener it just bound. */
+function keyboardHud() {
+  const fired = [];
+  const handlers = new Proxy({}, { get: (_, name) => (...args) => fired.push([name, ...args]) });
+  new Hud(handlers);
+  return { fired, press: (key, opts = {}) => globalThis.keyHandlers.at(-1)({ key, ...opts }) };
+}
+
+test('Enter skips the wait between stages', () => {
+  const { fired, press } = keyboardHud();
+
+  press('Enter');
+  assert.deepEqual(fired, [['onSkip']]);
+});
+
+test('Enter does not fire the shortcut while a button has focus', () => {
+  // Enter already activates a focused button. Hijacking it here would fire both, so
+  // tabbing to PAUSE and pressing Enter would pause and skip in one keystroke.
+  const { fired, press } = keyboardHud();
+  globalThis.document.activeElement = { tagName: 'BUTTON' };
+
+  press('Enter');
+  assert.deepEqual(fired, [], 'the button gets it, not the shortcut');
+
+  globalThis.document.activeElement = null;
+  press('Enter');
+  assert.deepEqual(fired, [['onSkip']], 'and it works again once focus is elsewhere');
+});
+
+test('held keys do not repeat-fire the hotkeys', () => {
+  const { fired, press } = keyboardHud();
+
+  press('Enter', { repeat: true });
+  press('r', { repeat: true });
+  assert.deepEqual(fired, [], 'auto-repeat is not a stream of skips and restarts');
+});
+
+test('a modified Enter belongs to the browser, not the game', () => {
+  const { fired, press } = keyboardHud();
+
+  press('Enter', { ctrlKey: true });
+  press('Enter', { metaKey: true });
+  assert.deepEqual(fired, []);
 });

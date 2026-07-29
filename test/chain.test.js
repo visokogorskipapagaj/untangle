@@ -107,14 +107,24 @@ test('growth is 20% per five stages, spread across them rather than stepped', ()
 });
 
 test('nothing before GROWTH_FROM is touched by the ramp', () => {
+  // Deliberately not recomputing the early formula. A copy of it here would agree with the
+  // source whatever either of them said, including when both are wrong. What the ramp must
+  // not do is start early, so the properties the early curve has on its own are the test:
+  // it climbs, it never exceeds ROPES_MAX, and it has flattened onto that cap well before
+  // GROWTH_FROM — which is the whole reason the ramp exists.
+  let last = 0;
   for (let stage = 1; stage <= STAGE.GROWTH_FROM; stage++) {
-    const spec = stageSpec(stage);
-    const early = Math.min(
-      STAGE.ROPES_MAX,
-      Math.floor(STAGE.ROPES_BASE + stage * STAGE.ROPES_PER_STAGE),
-    );
-    assert.equal(spec.ropeCount, early, `stage ${stage} keeps the early rope curve`);
+    const { ropeCount } = stageSpec(stage);
+    assert.ok(ropeCount >= last, `stage ${stage} must not shrink`);
+    assert.ok(ropeCount <= STAGE.ROPES_MAX, `stage ${stage} is past the early cap`);
+    last = ropeCount;
   }
+  assert.equal(last, STAGE.ROPES_MAX, 'and it arrives at the cap by GROWTH_FROM');
+  assert.equal(stageSpec(1).ropeCount, STAGE.ROPES_BASE, 'stage 1 is the base count');
+
+  // The ramp is off up to here and on immediately after — the join is the actual claim.
+  assert.equal(stageSpec(STAGE.GROWTH_FROM).ropeCount, STAGE.ROPES_MAX);
+  assert.ok(stageSpec(STAGE.GROWTH_FROM + STAGE.GROWTH_EVERY).ropeCount > STAGE.ROPES_MAX);
 });
 
 test('both counts stop at a ceiling and hold there', () => {
@@ -335,19 +345,24 @@ test('the renderer survives a board carrying a detonated and a cursed rope', () 
   assert.ok(calls.includes('arc'), 'markers and shockwaves were drawn');
 });
 
-test('the chain window opens at WINDOW_MS and tightens by WINDOW_DECAY per rung', () => {
+test('the chain window opens at WINDOW_MS and tightens every rung', () => {
   assert.equal(comboWindow(1), COMBO.WINDOW_MS);
   assert.equal(comboWindow(0), COMBO.WINDOW_MS, 'no chain yet gets the full window');
 
-  // Each rung multiplies by the decay factor.
-  assert.ok(Math.abs(comboWindow(2) - COMBO.WINDOW_MS * COMBO.WINDOW_DECAY) < 1e-9);
-  assert.ok(Math.abs(comboWindow(4) - COMBO.WINDOW_MS * COMBO.WINDOW_DECAY ** 3) < 1e-9);
-
-  // Strictly tightening, never below the floor.
+  // Deliberately not re-multiplying WINDOW_DECAY here. Restating the formula only asserts
+  // that two copies of it agree, which they will even when it is wrong; what has to hold
+  // is that the window really tightens, really compounds, and really stops at the floor.
   for (let chain = 1; chain < 40; chain++) {
     assert.ok(comboWindow(chain + 1) <= comboWindow(chain), `rung ${chain} must not loosen`);
-    assert.ok(comboWindow(chain) >= COMBO.WINDOW_MIN_MS);
+    assert.ok(comboWindow(chain) >= COMBO.WINDOW_MIN_MS, `rung ${chain} below the floor`);
   }
+
+  // Compounding rather than linear: the drop from rung 1 to 2 is bigger than 2 to 3, which
+  // is the difference between a curve and a slope and is what the decay factor is for.
+  const drop = (rung) => comboWindow(rung) - comboWindow(rung + 1);
+  assert.ok(drop(1) > drop(2), 'the steps shrink');
+  assert.ok(drop(2) > drop(3));
+  assert.ok(comboWindow(2) < comboWindow(1), 'and every one of them is a real tightening');
 });
 
 test('the window at the top of the ladder is still landable', () => {

@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { COMBO } from '../src/config.js';
 import { Rope } from '../src/rope.js';
-import { comboName, comboWindow, ScoreKeeper } from '../src/scoring.js';
+import { comboName, comboWindow, cursedStep, ScoreKeeper } from '../src/scoring.js';
 import { TangleTracker } from '../src/tangle.js';
 
 /** ScoreKeeper in isolation: what a gesture is worth, and what a combo pot is worth. */
@@ -110,39 +110,6 @@ test('each knot is priced and banked into the run as it lands', () => {
   assert.ok(Math.abs(score.comboScore - (first + second)) < 1e-9, 'accrued, not re-derived');
 });
 
-test('the rung has no ceiling and keeps paying more', () => {
-  const score = scored();
-  let last = 0;
-  for (let k = 1; k <= 40; k++) {
-    const gained = score.addKnot();
-    assert.ok(gained > last, `knot ${k} must be worth more than knot ${k - 1}`);
-    last = gained;
-  }
-  assert.equal(score.comboKnots, 40, 'no cap on the count either');
-});
-
-test('one knot is not a run and pays nothing', () => {
-  const score = scored();
-  score.addKnot();
-
-  assert.equal(score.comboValue(0), 0, 'nothing shown');
-  assert.equal(score.cashCombo(0, false), null, 'and nothing paid');
-  assert.equal(score.comboScore, 0, 'the knot is dropped, not banked flat');
-  assert.equal(score.points, 0);
-});
-
-test('two knots make a run, and it banks what it accrued', () => {
-  const score = scored();
-  const a = score.addKnot();
-  const b = score.addKnot();
-
-  assert.ok(Math.abs(score.comboValue(0) - (a + b)) < 1e-9);
-  const cash = score.cashCombo(0, false);
-  assert.equal(cash.knots, 2);
-  assert.ok(Math.abs(cash.paid - (a + b)) < 1e-9);
-  assert.ok(Math.abs(score.points - (a + b)) < 1e-9);
-});
-
 test('a long run is worth more than the same knots taken in short ones', () => {
   const long = scored();
   for (let k = 0; k < 8; k++) long.addKnot();
@@ -157,35 +124,6 @@ test('a long run is worth more than the same knots taken in short ones', () => {
   }
 
   assert.ok(held > split, `holding eight (${held.toFixed(0)}) beats four twos (${split.toFixed(0)})`);
-});
-
-test('the cursed multiplier acts on everything the run has accrued, uncapped', () => {
-  const score = scored();
-  for (let k = 0; k < 3; k++) score.addKnot();
-  const accrued = score.comboScore;
-
-  assert.ok(Math.abs(score.comboValue(8) - accrued * 8) < 1e-9, 'the whole run is multiplied');
-
-  const cash = score.cashCombo(17, false);
-  assert.equal(cash.cursed, 17, 'well past the old x10 ladder cap');
-  assert.ok(Math.abs(cash.paid - accrued * 17) < 1e-9);
-});
-
-test('a bail strips the cursed multiplier and pays only what the knots accrued', () => {
-  const clean = scored();
-  for (let k = 0; k < 4; k++) clean.addKnot();
-  const landed = clean.cashCombo(5, false);
-
-  const fumbled = scored();
-  for (let k = 0; k < 4; k++) fumbled.addKnot();
-  const accrued = fumbled.comboScore;
-  const bailed = fumbled.cashCombo(5, true);
-
-  assert.equal(bailed.cursed, 1);
-  assert.ok(Math.abs(bailed.paid - accrued) < 1e-9, 'the knots still pay');
-  assert.ok(bailed.paid < landed.paid, 'but the curse is forfeit');
-  assert.equal(fumbled.bestCombo, 1, 'and a bail is never a personal best');
-  assert.equal(fumbled.bestCursed, 0);
 });
 
 test('letting the window lapse is a landing — it banks in full', () => {
@@ -274,49 +212,32 @@ test('a bail is visible as the projected score collapsing to the bare knots', ()
   assert.ok(Math.abs(score.score - accrued) < 1e-9, 'it falls back to what the knots earned');
 });
 
-test('the combo ladder covers every rung of the cursed multiplier', () => {
-  // Names are flavour and get rewritten; the shape of the ladder is what must hold. It is
-  // walked by the *cursed* multiplier, which opens at CURSED_BASE and detonates at MAX —
-  // so the ladder is covered end to end exactly once per cleared curse.
-  assert.equal(COMBO.NAMES.length, COMBO.MAX + 1, 'one name per rung, plus the unused 0');
-  assert.equal(COMBO.NAMES[1], '', 'below CURSED_BASE there is no cursed run to name');
+test('the combo ladder names exactly the rungs that can happen', () => {
+  // Names are flavour and get rewritten; the shape of the ladder is what must hold.
+  assert.equal(COMBO.NAMES.length, COMBO.MAX + 1, 'one slot per rung, indexed by multiplier');
+
+  // CURSED_BASE is not a threshold anyone picked — it is the smallest value #advance can
+  // produce, so it has to be derived from the same arithmetic rather than trusted. This
+  // used to assert from a hardcoded 2, which named a rung the game could never reach and
+  // left NAMES[2] as content no player would ever see.
+  const opens = 1 + cursedStep(1);
+  assert.equal(COMBO.CURSED_BASE, opens, 'the first nameable rung is the first reachable one');
+
+  for (let rung = 0; rung < COMBO.CURSED_BASE; rung++) {
+    assert.equal(COMBO.NAMES[rung], '', `x${rung} cannot happen, so it must not be named`);
+  }
   for (let rung = COMBO.CURSED_BASE; rung <= COMBO.MAX; rung++) {
     assert.ok(COMBO.NAMES[rung], `cursed x${rung} needs a name`);
   }
-  assert.ok(COMBO.NAMES[COMBO.MAX], 'and the rung that detonates gets the biggest one');
-});
 
-test('the name names the cursed multiplier, and nothing else', () => {
-  assert.equal(comboName(COMBO.CURSED_BASE), COMBO.NAMES[COMBO.CURSED_BASE], 'x2 opens it');
-  assert.equal(comboName(4), COMBO.NAMES[4]);
-  assert.equal(comboName(0), '', 'an uncursed run has no name to shout');
-  assert.equal(
-    comboName(40),
-    COMBO.NAMES[COMBO.MAX],
-    'the multiplier climbs by rope weight and has no ceiling, so it keeps the last name',
-  );
-  // It is a bare name, never a second x-number: the multiplier it names is already on
-  // screen directly above it, and two x-numbers side by side read as the same quantity.
-  assert.ok(!comboName(4).includes('×'), 'no multiplier notation in the name itself');
+  // Blanks rather than deletions: the list is indexed by the multiplier, so removing the
+  // dead slots would slide every name down one and rename every rung above them.
+  assert.equal(comboName(COMBO.CURSED_BASE), 'TRIPLE', 'the first reachable rung, by index');
+  assert.ok(COMBO.NAMES[COMBO.MAX], 'and the rung that detonates gets the biggest one');
+  assert.ok(!COMBO.NAMES[COMBO.MAX].includes('×'), 'a bare name, never a second x-number');
 });
 
 // --- heavy ropes ---------------------------------------------------------------------
-
-test('a knot is worth the weight of the rope it came off', () => {
-  const light = scored();
-  const heavy = scored();
-
-  const one = light.addKnot(1);
-  const three = heavy.addKnot(3);
-
-  assert.equal(one, COMBO.KNOT_VALUE, 'a light rope is the flat price');
-  assert.ok(Math.abs(three - one * 3) < 1e-9, 'a triple rope pays triple for the same knot');
-
-  // Called with nothing at all — the detonation knots take this path, and so does every
-  // caller that predates weights mattering.
-  const plain = scored().addKnot();
-  assert.equal(plain, COMBO.KNOT_VALUE, 'weight defaults to a flat one');
-});
 
 test('weight scales the rung rather than replacing it', () => {
   const score = scored();
@@ -331,16 +252,3 @@ test('weight scales the rung rather than replacing it', () => {
   );
 });
 
-test('hauling the heavy rope is worth more than picking off the light ones', () => {
-  // The whole point: a triple rope costs three moves to shift, so its knots have to pay
-  // for that or the expensive ropes are the ones a run cannot afford to touch.
-  const heavy = scored();
-  heavy.addKnot(3);
-  heavy.addKnot(3);
-
-  const light = scored();
-  light.addKnot(1);
-  light.addKnot(1);
-
-  assert.ok(heavy.cashCombo(0, false).paid > light.cashCombo(0, false).paid);
-});

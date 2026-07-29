@@ -29,11 +29,19 @@ const popcount = (x) => {
  * Unweighted, the answer is the *fewest* ropes to relocate; weighted, it is the
  * *cheapest* set, which is often a different and larger set of lighter ropes.
  *
- * @param {number} vertexCount up to 31
+ * The active set is a bitmask, so the vertex count is bounded by the 32 bits JavaScript's
+ * bitwise operators coerce to. STAGE.ROPES_CEILING is 28, well inside it, and the throw
+ * below is what makes that a checked assumption rather than a silent wrong answer: past
+ * 32, `1 << v` wraps around and starts aliasing other vertices.
+ *
+ * @param {number} vertexCount up to 32
  * @param {Array<[number, number]>} edges
  * @param {number[]|null} weights per-vertex move cost; null means all 1
  */
 export function minimumVertexCover(vertexCount, edges, weights = null) {
+  if (vertexCount > 32) {
+    throw new RangeError(`minimumVertexCover: ${vertexCount} vertices exceeds the 32-bit mask`);
+  }
   if (vertexCount <= 0 || edges.length === 0) return 0;
 
   const costOf = (v) => (weights ? weights[v] : 1);

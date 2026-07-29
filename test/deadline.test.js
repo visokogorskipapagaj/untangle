@@ -5,6 +5,9 @@ import { CLOCK } from '../src/config.js';
 import {
   expectedTime,
   formatClock,
+  poolFraction,
+  pooledRuns,
+  pooledTime,
   recordClear,
   runsCounted,
   slackFor,
@@ -290,4 +293,107 @@ test('the readout counts in seconds, then in tenths, and names the untimed stage
 test('a finished duration is reported without the countdown tenths', () => {
   assert.equal(formatClock(4900, { tenths: false }), '0:05');
   assert.equal(formatClock(95000, { tenths: false }), '1:35');
+});
+
+// --- the shared pool -------------------------------------------------------------------
+
+/** A par table as the server sends it: stage -> already-expected ms. */
+const pars = (stage, ms) => ({ [String(stage)]: ms });
+
+test('the pool times a stage this player has never cleared', () => {
+  // The rule this replaces: a debut board used to be untimed no matter what. It is the
+  // whole point of pooling, and the thing a new player will notice first.
+  assert.equal(stageDeadline(5, {}), null, 'nothing pooled, nothing to go on');
+  assert.equal(stageDeadline(5, {}, pars(5, 20000)), 20000 * slackFor(5));
+});
+
+test('a stage nobody at all has cleared is still untimed', () => {
+  assert.equal(stageDeadline(80, {}, pars(5, 20000)), null);
+  assert.equal(stageDeadline(80, {}, {}), null);
+});
+
+test('the pool answers ahead of the player, and the player answers without it', () => {
+  // Their own runs are the fast ones here, so the floor cannot be what decides this — the
+  // pooled par is genuinely being preferred to a personal average that disagrees with it.
+  const mine = history(10, [12000, 10000, 11000]);
+  assert.equal(stageDeadline(10, mine, pars(10, 20000)), 20000 * slackFor(10));
+  // Same call with an empty table is the offline path, and it is the old behaviour intact.
+  assert.equal(stageDeadline(10, mine, {}), expectedTime(10, mine) * slackFor(10));
+});
+
+test('a malformed par is ignored rather than producing a NaN deadline', () => {
+  // This arrives from the network and from localStorage, so it is not hypothetical. A NaN
+  // limit is the worst outcome available: the clock is neither running nor off.
+  for (const bad of [{ 5: 'soon' }, { 5: null }, { 5: 0 }, { 5: -1 }, { 5: NaN }]) {
+    assert.equal(stageDeadline(5, {}, bad), null, `rejects ${JSON.stringify(bad)}`);
+  }
+});
+
+test('poolFraction traces the same curve slowestStruck does, as a fraction', () => {
+  assert.equal(poolFraction(1), 1, 'nothing struck before par');
+  assert.equal(poolFraction(CLOCK.PAR_STAGE), 1);
+  // At each stage past par the personal model strikes one more of CLOCK.KEEP runs. The
+  // pooled fraction has to be that same proportion or the late game stops biting.
+  for (let stage = CLOCK.PAR_STAGE; stage <= CLOCK.PAR_STAGE + CLOCK.KEEP; stage++) {
+    const expected = Math.max(1 / CLOCK.KEEP, 1 - slowestStruck(stage) / CLOCK.KEEP);
+    assert.equal(poolFraction(stage), expected, `stage ${stage}`);
+  }
+});
+
+test('the pooled slice bottoms out and holds, however far past par', () => {
+  const floor = poolFraction(CLOCK.PAR_STAGE + CLOCK.KEEP);
+  assert.equal(floor, 1 / CLOCK.KEEP);
+  assert.equal(poolFraction(CLOCK.PAR_STAGE + CLOCK.KEEP + 40), floor, 'never below it');
+});
+
+test('a large pool still tightens past par — the count-based rule would not', () => {
+  // The bug this exists to prevent: striking `stage - PAR` runs off 400 samples is a 0.25%
+  // change, and the entire late-game curve silently flattens once the pool is big enough.
+  // The same 400 runs filed against two stages, so the only difference is the slice.
+  const samples = spread(20000, 60000, 400);
+  const pool = { [CLOCK.PAR_STAGE]: samples, [CLOCK.PAR_STAGE + 10]: samples };
+  const early = pooledTime(CLOCK.PAR_STAGE, pool);
+  const late = pooledTime(CLOCK.PAR_STAGE + 10, pool);
+  assert.ok(late < early * 0.9, `expected a real tightening, got ${late} vs ${early}`);
+});
+
+test('the pooled slice takes the fastest runs, never the slowest', () => {
+  const pool = { 45: spread(10000, 90000, 200) };
+  const runs = pooledRuns(45, pool);
+  assert.ok(runs.length < 200, 'a slice, not the lot');
+  assert.deepEqual(runs, [...runs].sort((a, b) => a - b), 'fastest first');
+  assert.ok(Math.max(...runs) < 50000, 'and it is the fast end that survives');
+});
+
+test('a pool of one is measured against that one run', () => {
+  assert.equal(pooledTime(3, { 3: [25000] }), 25000);
+  assert.equal(pooledTime(3, {}), null);
+  assert.deepEqual(pooledRuns(3, {}), []);
+});
+
+// --- the floor the pool cost us --------------------------------------------------------
+
+test('a pooled deadline is never tighter than a run this player has already hit', () => {
+  // The invariant the personal model got for free: the tightest deadline reachable is a
+  // time they have proved. OWN_FLOOR is that guarantee put back by hand.
+  const mine = history(50, [30000, 32000, 31000]);
+  const brutal = stageDeadline(50, mine, pars(50, 5000));
+  assert.equal(brutal, 30000, 'floored at their best, not the pool s 5s');
+});
+
+test('the floor only ever loosens — a reachable pooled deadline stands', () => {
+  const mine = history(12, [30000, 32000, 31000]);
+  const generous = stageDeadline(12, mine, pars(12, 45000));
+  assert.equal(generous, 45000 * slackFor(12), 'well above their best, so untouched');
+});
+
+test('the floor cannot help on a stage the player has never cleared', () => {
+  // Worth pinning because it is the real cost of pooling rather than an oversight: there
+  // is no proved time to floor against, so the pool s number stands unguarded.
+  assert.equal(stageDeadline(50, {}, pars(50, 5000)), 5000 * slackFor(50));
+});
+
+test('the floor reads the fastest clear, not the most recent', () => {
+  const mine = history(50, [28000, 60000, 55000]);
+  assert.equal(stageDeadline(50, mine, pars(50, 1000)), 28000);
 });

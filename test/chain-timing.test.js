@@ -172,10 +172,10 @@ test('one knot is not a combo — nothing is shown and nothing is owed', () => {
 
   clear(game, 0);
 
-  assert.equal(game.chain, 1);
+  assert.equal(game.combo.chain, 1);
   assert.equal(game.banner, null, 'nothing to shout about yet');
-  assert.equal(game.score.comboValue(game.cursedMult), 0, 'and nothing at stake');
-  assert.ok(game.chainTimer > 0, 'the clock, however, is already running');
+  assert.equal(game.score.comboValue(game.combo.cursedMult), 0, 'and nothing at stake');
+  assert.ok(game.combo.chainTimer > 0, 'the clock, however, is already running');
 });
 
 test('a second knot inside the window makes it a combo', () => {
@@ -184,8 +184,8 @@ test('a second knot inside the window makes it a combo', () => {
   clear(game, 0);
   clear(game, 1);
 
-  assert.equal(game.chain, 2);
-  assert.ok(game.score.comboValue(game.cursedMult) > 0, 'now there is something at stake');
+  assert.equal(game.combo.chain, 2);
+  assert.ok(game.score.comboValue(game.combo.cursedMult) > 0, 'now there is something at stake');
 });
 
 test('a leisurely second drop does NOT make a combo', () => {
@@ -194,13 +194,13 @@ test('a leisurely second drop does NOT make a combo', () => {
   const game = makeGame(ladderBoard());
 
   clear(game, 0);
-  assert.equal(game.chain, 1);
+  assert.equal(game.combo.chain, 1);
 
   advance(game, comboWindow(1) + 500); // wander off and come back
-  assert.equal(game.chain, 0, 'the run expired');
+  assert.equal(game.combo.chain, 0, 'the run expired');
 
   clear(game, 1);
-  assert.equal(game.chain, 1, 'so this is a fresh first knot, not a double');
+  assert.equal(game.combo.chain, 1, 'so this is a fresh first knot, not a double');
   assert.equal(game.banner, null, 'and no callout was earned');
 });
 
@@ -230,8 +230,8 @@ test('the combo counts knots, not drops — one pull that rips three apart is th
 
   land(game, 0, 300, 0);
 
-  assert.equal(game.chain, 3, 'one drop, three knots, three rungs');
-  assert.ok(game.score.comboValue(game.cursedMult) > 0, 'and it is a combo straight away');
+  assert.equal(game.combo.chain, 3, 'one drop, three knots, three rungs');
+  assert.ok(game.score.comboValue(game.combo.cursedMult) > 0, 'and it is a combo straight away');
 });
 
 test('the rung climbs one per knot, whatever the rope weighs', () => {
@@ -240,20 +240,20 @@ test('the rung climbs one per knot, whatever the rope weighs', () => {
   const game = makeGame(ladderBoard([3, 2, 1, 2]));
 
   clear(game, 0);
-  assert.equal(game.chain, 1, 'a x3 rope taking one knot is one rung');
+  assert.equal(game.combo.chain, 1, 'a x3 rope taking one knot is one rung');
 
   clear(game, 1);
-  assert.equal(game.chain, 2, 'a x2 rope taking one knot is one more — x2, not x5');
+  assert.equal(game.combo.chain, 2, 'a x2 rope taking one knot is one more — x2, not x5');
 
   clear(game, 2);
-  assert.equal(game.chain, 3);
+  assert.equal(game.combo.chain, 3);
 });
 
 test('the rung has no ceiling', () => {
   const game = makeGame(ladderBoard());
   for (let k = 0; k < 6; k++) clear(game, k);
-  assert.equal(game.chain, 6, 'still climbing');
-  assert.ok(game.score.comboValue(game.cursedMult) > 0);
+  assert.equal(game.combo.chain, 6, 'still climbing');
+  assert.ok(game.score.comboValue(game.combo.cursedMult) > 0);
 });
 
 test('a combo gets exactly one callout, at the moment it pays', () => {
@@ -264,11 +264,11 @@ test('a combo gets exactly one callout, at the moment it pays', () => {
   clear(game, 0);
   clear(game, 1);
   clear(game, 2);
-  assert.equal(game.chain, 3);
+  assert.equal(game.combo.chain, 3);
   assert.equal(game.banner, null, 'silent while it climbs — the indicator carries that');
 
   advance(game, comboWindow(3) + 60);
-  assert.equal(game.chain, 0, 'lapsed');
+  assert.equal(game.combo.chain, 0, 'lapsed');
   assert.ok(game.banner, 'and now, once, the payout');
   assert.equal(game.banner.multiplier, '3 KNOTS');
   assert.ok(game.banner.payout);
@@ -293,14 +293,14 @@ test('the window burns while the player is holding a rope', () => {
   const game = makeGame(ladderBoard());
   clear(game, 0);
 
-  const started = game.chainTimer;
+  const started = game.combo.chainTimer;
   const rope = game.ropes[V(1)];
   game.onGrab(rope.nodes[0].x, rope.nodes[0].y, false);
   advance(game, 160);
 
   assert.ok(
-    game.chainTimer <= started - 140,
-    `holding a rope must not pause the clock (${started.toFixed(0)} -> ${game.chainTimer.toFixed(0)})`,
+    game.combo.chainTimer <= started - 140,
+    `holding a rope must not pause the clock (${started.toFixed(0)} -> ${game.combo.chainTimer.toFixed(0)})`,
   );
 });
 
@@ -309,8 +309,8 @@ test('the bar the player watches is the deadline they are racing', () => {
   clear(game, 0);
   clear(game, 1);
 
-  const window = comboWindow(game.chain);
-  const before = game.chainTimer;
+  const window = comboWindow(game.combo.chain);
+  const before = game.combo.chainTimer;
 
   advance(game, 100);
   const idle = game.hud.stats.chainFraction;
@@ -342,9 +342,9 @@ test('holding a rope past the window ends the old chain but primes a new one', (
   clear(game, 0);
   clear(game, 1);
   clear(game, 2);
-  assert.equal(game.chain, 3);
+  assert.equal(game.combo.chain, 3);
 
-  const projected = game.score.projected(game.cursedMult);
+  const projected = game.score.projected(game.combo.cursedMult);
 
   // Grab, dawdle well past the window, then drop perfectly cleanly.
   clear(game, 3, comboWindow(3) + 400);
@@ -354,7 +354,7 @@ test('holding a rope past the window ends the old chain but primes a new one', (
     game.score.points >= projected - 1e-6,
     'the old chain banked at the rung it reached — lapsing is a landing, not a bail',
   );
-  assert.equal(game.chain, 1, 'and the late-but-clean drop primes a fresh chain');
+  assert.equal(game.combo.chain, 1, 'and the late-but-clean drop primes a fresh chain');
   assert.equal(game.score.comboKnots, 1, 'whose knots are its own, not the old potticket');
 });
 
@@ -365,17 +365,17 @@ test('a rope dropped inside the window lands, even though the settle outlasts it
   clear(game, 0);
   clear(game, 1);
 
-  advance(game, game.chainTimer - 40, 8);
+  advance(game, game.combo.chainTimer - 40, 8);
   assert.ok(
-    game.chainTimer > 0 && game.chainTimer < ROPE.SETTLE_MS,
-    `sliver, shorter than a settle (${game.chainTimer.toFixed(0)}ms)`,
+    game.combo.chainTimer > 0 && game.combo.chainTimer < ROPE.SETTLE_MS,
+    `sliver, shorter than a settle (${game.combo.chainTimer.toFixed(0)}ms)`,
   );
 
   drag(game, V(2), 0, -170);
-  assert.equal(game.chain, 2, 'not evaluated yet — the settle is still running');
+  assert.equal(game.combo.chain, 2, 'not evaluated yet — the settle is still running');
 
   settleOut(game);
-  assert.equal(game.chain, 3, 'the drop was inside the window, so the rung counts');
+  assert.equal(game.combo.chain, 3, 'the drop was inside the window, so the rung counts');
 });
 
 test('the window lapsing mid-settle cannot cash a chain from behind', () => {
@@ -383,14 +383,14 @@ test('the window lapsing mid-settle cannot cash a chain from behind', () => {
   clear(game, 0);
   clear(game, 1);
 
-  advance(game, game.chainTimer - 20, 8);
+  advance(game, game.combo.chainTimer - 20, 8);
   drag(game, V(2), 0, -170);
 
   for (let t = 0; t < ROPE.SETTLE_MS; t += 16) {
     game.update(16, 0);
-    if (game.settle) assert.equal(game.chain, 2, 'no cash-out while a drop is pending');
+    if (game.settle) assert.equal(game.combo.chain, 2, 'no cash-out while a drop is pending');
   }
-  assert.equal(game.chain, 3);
+  assert.equal(game.combo.chain, 3);
 });
 
 test('a rope that drifts onto a neighbour during the settle is not a fumble', () => {
@@ -406,7 +406,7 @@ test('a rope that drifts onto a neighbour during the settle is not a fumble', ()
   assert.ok(game.tracker.createdSinceMark() > 0, 'the drift really did make a fresh knot');
   settleOut(game);
 
-  assert.equal(game.chain, 2, 'the drop is what is judged, not where the settle left it');
+  assert.equal(game.combo.chain, 2, 'the drop is what is judged, not where the settle left it');
 });
 
 test('parking a rope on another one bails the chain and strips the multipliers', () => {
@@ -415,12 +415,12 @@ test('parking a rope on another one bails the chain and strips the multipliers',
   clear(game, 1);
   clear(game, 2);
   clear(game, 3);
-  assert.equal(game.chain, 4);
+  assert.equal(game.combo.chain, 4);
 
   // What the run would have been worth had a cursed multiplier been riding on it.
   const accrued = game.score.comboScore;
-  game.cursedMult = 5;
-  const promised = game.score.comboValue(game.cursedMult);
+  game.combo.cursedMult = 5;
+  const promised = game.score.comboValue(game.combo.cursedMult);
   assert.ok(promised > accrued, 'there is a multiplier to lose');
 
   const banked = game.score.points;
@@ -428,8 +428,8 @@ test('parking a rope on another one bails the chain and strips the multipliers',
   // Drop the next rope straight onto a neighbour's horizontal.
   land(game, V(4), -200, 60);
 
-  assert.equal(game.chain, 0, 'the chain is gone');
-  assert.equal(game.cursedMult, 0);
+  assert.equal(game.combo.chain, 0, 'the chain is gone');
+  assert.equal(game.combo.cursedMult, 0);
   assert.ok(game.banner?.killed, 'and it died on screen');
 
   const paid = game.score.points - banked;
@@ -461,27 +461,27 @@ test('the curse cannot open a multiplier cold — there is nothing to multiply',
 
   land(game, 1, 0, 260);
 
-  assert.equal(game.cursedMult, 0, 'no run was going, so no multiplier');
-  assert.equal(game.chain, 1, 'it is just the first knot of one');
+  assert.equal(game.combo.cursedMult, 0, 'no run was going, so no multiplier');
+  assert.equal(game.combo.chain, 1, 'it is just the first knot of one');
 });
 
 test('a heavy rope off the curse used to open at x4 from cold — now it is one knot', () => {
   const game = makeGame(cursedBoard([2, 1]));
 
   land(game, 1, 0, 260);
-  assert.equal(game.cursedMult, 0);
-  assert.equal(game.chain, 1);
+  assert.equal(game.combo.cursedMult, 0);
+  assert.equal(game.combo.chain, 1);
 });
 
 test('a knot off the curse while a run is going opens the multiplier', () => {
   const game = makeGame(cursedBoard());
 
   land(game, 3, 0, -170); // an ordinary knot starts the run
-  assert.equal(game.chain, 1);
+  assert.equal(game.combo.chain, 1);
 
   land(game, 1, 0, 260); // now one off the curse
-  assert.equal(game.cursedMult, opened());
-  assert.equal(game.chain, 2, 'and it is still a knot, so the rung climbs too');
+  assert.equal(game.combo.cursedMult, opened());
+  assert.equal(game.combo.chain, 2, 'and it is still a knot, so the rung climbs too');
 });
 
 test('the multiplier acts on everything the run accrued, including knots before it', () => {
@@ -493,13 +493,13 @@ test('the multiplier acts on everything the run accrued, including knots before 
   assert.ok(accrued > 0);
 
   land(game, 1, 0, 260); // off the curse
-  assert.equal(game.cursedMult, opened());
+  assert.equal(game.combo.cursedMult, opened());
   assert.ok(
-    game.score.comboValue(game.cursedMult) > game.score.comboScore,
+    game.score.comboValue(game.combo.cursedMult) > game.score.comboScore,
     'the whole run is multiplied, not just what came after',
   );
   assert.ok(
-    Math.abs(game.score.comboValue(game.cursedMult) - game.score.comboScore * opened()) <
+    Math.abs(game.score.comboValue(game.combo.cursedMult) - game.score.comboScore * opened()) <
       1e-9,
   );
 });
@@ -509,21 +509,21 @@ test('inside a cursed combo the multiplier climbs by rope weight, uncapped', () 
 
   land(game, 3, 0, -170); // start a run
   land(game, 1, 0, 260); // off the curse -> x2
-  assert.equal(game.cursedMult, opened());
+  assert.equal(game.combo.cursedMult, opened());
 
   land(game, 2, 0, 300); // a weight-3 rope off the curse
-  assert.equal(game.cursedMult, opened() + cursedStep(3), 'weight climbs the multiplier');
+  assert.equal(game.combo.cursedMult, opened() + cursedStep(3), 'weight climbs the multiplier');
 });
 
 test('a cursed combo burns the window faster', () => {
   const game = makeGame(cursedBoard());
   land(game, 3, 0, -170);
   land(game, 1, 0, 260);
-  assert.equal(game.cursedMult, opened());
+  assert.equal(game.combo.cursedMult, opened());
 
-  const started = game.chainTimer;
+  const started = game.combo.chainTimer;
   advance(game, 100, 10);
-  const burned = started - game.chainTimer;
+  const burned = started - game.combo.chainTimer;
   assert.ok(
     Math.abs(burned - 100 * COMBO.CURSED_BURN) < 12,
     `100ms should burn ~${100 * COMBO.CURSED_BURN}ms of window, burned ${burned.toFixed(0)}`,
@@ -535,11 +535,11 @@ test('the multiplier is a property of the run and survives ordinary knots', () =
 
   land(game, 3, 0, -170);
   land(game, 1, 0, 260); // cursed x2
-  assert.equal(game.cursedMult, opened());
+  assert.equal(game.combo.cursedMult, opened());
 
   land(game, 5, 0, -170); // an ordinary rope, nowhere near the curse
-  assert.equal(game.cursedMult, opened(), 'still multiplying');
-  assert.equal(game.chain, 3, 'and the knot still counts');
+  assert.equal(game.combo.cursedMult, opened(), 'still multiplying');
+  assert.equal(game.combo.chain, 3, 'and the knot still counts');
   assert.equal(game.hud.stats.cursedMult, opened(), 'the HUD is told');
 });
 
@@ -547,11 +547,11 @@ test('the multiplier dies with the run', () => {
   const game = makeGame(cursedBoard());
   land(game, 3, 0, -170);
   land(game, 1, 0, 260);
-  assert.equal(game.cursedMult, opened());
+  assert.equal(game.combo.cursedMult, opened());
 
-  advance(game, comboWindow(game.chain) * 2 + 200);
-  assert.equal(game.chain, 0);
-  assert.equal(game.cursedMult, 0, 'the next run starts uncursed');
+  advance(game, comboWindow(game.combo.chain) * 2 + 200);
+  assert.equal(game.combo.chain, 0);
+  assert.equal(game.combo.cursedMult, 0, 'the next run starts uncursed');
 });
 
 test('the cursed rope itself is not in its own field', () => {
@@ -560,8 +560,8 @@ test('the cursed rope itself is not in its own field', () => {
   land(game, 3, 0, -170); // start a run
   land(game, 0, -300, 0); // haul the black rope off both its ropes
 
-  assert.equal(game.cursedMult, 0, 'it cannot open or climb the multiplier');
-  assert.ok(game.chain >= 2, 'its knots still count as ordinary rungs');
+  assert.equal(game.combo.cursedMult, 0, 'it cannot open or climb the multiplier');
+  assert.ok(game.combo.chain >= 2, 'its knots still count as ordinary rungs');
   assert.equal(game.ropes[0].removed, false, 'and it detonates nothing by itself');
 });
 
@@ -619,17 +619,17 @@ test('a x10 detonates the black rope the run fed on, not whichever sits first', 
   const game = makeGame(twoCursedBoard());
 
   land(game, 6, 0, -170); // an ordinary knot opens the run
-  assert.equal(game.chain, 1);
+  assert.equal(game.combo.chain, 1);
 
   land(game, 4, 0, 260); // off curse B — the run is now cursed, and fed on B
-  assert.equal(game.cursedMult, opened());
-  assert.equal(game.curseTarget, 1, 'B is what this run is eating');
+  assert.equal(game.combo.cursedMult, opened());
+  assert.equal(game.combo.curseTarget, 1, 'B is what this run is eating');
 
   // Stand the multiplier up just under the threshold and take one more knot off B.
-  game.cursedMult = COMBO.MAX - 1;
+  game.combo.cursedMult = COMBO.MAX - 1;
   land(game, 5, 0, 260);
 
-  assert.ok(game.cursedMult >= COMBO.MAX, 'the multiplier crossed x10');
+  assert.ok(game.combo.cursedMult >= COMBO.MAX, 'the multiplier crossed x10');
   assert.equal(game.ropes[1].removed, true, 'B — the one the work was done on — is gone');
   assert.equal(game.ropes[0].removed, false, 'A is untouched, it was never part of this run');
   assert.ok(
@@ -643,11 +643,11 @@ test('the target dies with the run, so the next one picks its own', () => {
 
   land(game, 6, 0, -170);
   land(game, 4, 0, 260); // cursed off B
-  assert.equal(game.curseTarget, 1);
+  assert.equal(game.combo.curseTarget, 1);
 
-  advance(game, comboWindow(game.chain) * 2 + 400); // let it lapse
-  assert.equal(game.chain, 0, 'the run is over');
-  assert.equal(game.curseTarget, -1, 'and it took its target with it');
+  advance(game, comboWindow(game.combo.chain) * 2 + 400); // let it lapse
+  assert.equal(game.combo.chain, 0, 'the run is over');
+  assert.equal(game.combo.curseTarget, -1, 'and it took its target with it');
 });
 
 // --- what the callout says ------------------------------------------------------------------
@@ -691,7 +691,7 @@ test('a cursed run is named for its multiplier, live and on the payout', () => {
 
   land(game, 3, 0, -170); // ordinary knot opens the run
   land(game, 1, 0, 260); // one off the curse takes it cursed
-  assert.equal(game.cursedMult, opened());
+  assert.equal(game.combo.cursedMult, opened());
 
   assert.equal(
     drawn(game).comboName,
@@ -701,8 +701,8 @@ test('a cursed run is named for its multiplier, live and on the payout', () => {
 
   // Step to the lapse rather than past it: a cursed window burns faster, and
   // overshooting it far enough would outlive the banner being asserted on.
-  for (let guard = 0; game.chain > 0 && guard < 400; guard++) advance(game, 16);
-  assert.equal(game.chain, 0, 'lapsed');
+  for (let guard = 0; game.combo.chain > 0 && guard < 400; guard++) advance(game, 16);
+  assert.equal(game.combo.chain, 0, 'lapsed');
 
   assert.equal(game.banner.multiplier, `CURSED COMBO ×${opened()}`);
   assert.equal(game.banner.text, comboName(opened()));
@@ -715,11 +715,11 @@ test('the name climbs with the multiplier, not with the knots', () => {
   land(game, 3, 0, -170); // open a run
   land(game, 1, 0, 260); // off the curse -> x2
   const atBase = drawn(game).comboName;
-  const knotsAtBase = game.chain;
+  const knotsAtBase = game.combo.chain;
 
   land(game, 2, 0, 300); // a weight-3 rope off the curse -> x5
-  assert.equal(game.cursedMult, opened() + cursedStep(3));
-  assert.ok(game.chain > knotsAtBase, 'the knot rung climbed too');
+  assert.equal(game.combo.cursedMult, opened() + cursedStep(3));
+  assert.ok(game.combo.chain > knotsAtBase, 'the knot rung climbed too');
 
   const atFive = drawn(game).comboName;
   assert.equal(atFive, comboName(opened() + cursedStep(3)), 'the name followed the multiplier');
@@ -739,7 +739,7 @@ test('the readout is struck every time the multiplier climbs', () => {
   assert.equal(drawn(game).cursedPop, 0, 'and it settles back');
 
   land(game, 2, 0, 300); // a weight-3 rope off the curse -> x5
-  assert.equal(game.cursedMult, opened() + cursedStep(3));
+  assert.equal(game.combo.cursedMult, opened() + cursedStep(3));
   assert.ok(drawn(game).cursedPop > 0.9, 'every climb strikes it again');
 });
 
@@ -752,10 +752,10 @@ test('an ordinary knot mid-curse does not strike the readout', () => {
   land(game, 1, 0, 260); // cursed x2
   advance(game, 400); // let the opening strike settle
 
-  const before = game.chain;
+  const before = game.combo.chain;
   land(game, 5, 0, -170); // an ordinary rope, nowhere near the curse
-  assert.ok(game.chain > before, 'the rung climbed');
-  assert.equal(game.cursedMult, opened(), 'the multiplier did not');
+  assert.ok(game.combo.chain > before, 'the rung climbed');
+  assert.equal(game.combo.cursedMult, opened(), 'the multiplier did not');
   assert.equal(drawn(game).cursedPop, 0, 'so the readout holds still');
 });
 
@@ -764,14 +764,14 @@ test('a jump never outlives the run that struck it', () => {
 
   land(game, 3, 0, -170);
   land(game, 1, 0, 260);
-  assert.ok(game.cursedPop > 0);
+  assert.ok(game.combo.cursedPop > 0);
 
   // End the run mid-jump — a drop that untangles nothing does it. The slot is about to be
   // handed to a different run, and a hop left in flight would land on whatever that one
   // puts there.
   land(game, 8, 0, -5); // shuffles a rope that stays exactly as knotted as it was
-  assert.equal(game.chain, 0, 'the run is dead');
-  assert.equal(game.cursedPop, 0, 'and it took its jump with it');
+  assert.equal(game.combo.chain, 0, 'the run is dead');
+  assert.equal(game.combo.cursedPop, 0, 'and it took its jump with it');
 });
 
 test('a cursed callout never puts a second x-number on screen', () => {
@@ -786,7 +786,7 @@ test('a cursed callout never puts a second x-number on screen', () => {
   const state = drawn(game);
   assert.ok(!state.comboName.includes('×'), 'the name is a bare name');
 
-  for (let guard = 0; game.chain > 0 && guard < 400; guard++) advance(game, 16);
+  for (let guard = 0; game.combo.chain > 0 && guard < 400; guard++) advance(game, 16);
   assert.ok(!game.banner.text.includes('×'), 'and so is the payout subhead');
   assert.equal(
     (`${game.banner.multiplier} ${game.banner.text}`.match(/×/g) || []).length,
@@ -804,8 +804,8 @@ test('a knot hauled off a triple rope is worth three of one off a light rope', (
   clear(heavy, 0);
   clear(light, 0);
 
-  assert.equal(heavy.chain, 1, 'weight prices the knot, it does not add rungs');
-  assert.equal(light.chain, 1);
+  assert.equal(heavy.combo.chain, 1, 'weight prices the knot, it does not add rungs');
+  assert.equal(light.combo.chain, 1);
   assert.ok(
     Math.abs(heavy.score.comboScore - light.score.comboScore * 3) < 1e-9,
     `${heavy.score.comboScore.toFixed(0)} should be three times ${light.score.comboScore.toFixed(0)}`,

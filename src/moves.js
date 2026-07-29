@@ -6,11 +6,27 @@ import { MOVES } from './config.js';
  * Moves count *down*. A stage grants `ideal + bonus`; spending past that draws on the
  * bank. Solve with moves to spare and the remainder banks; solve having overdrawn and
  * the bank pays the difference. Run both dry without solving and the stage is lost.
+ *
+ * The bank is a cushion rather than savings, so it is capped — see MOVES.BANK_MAX. The cap
+ * lives on the property itself rather than in the methods that write it, so there is no
+ * route that can miss it: a cap some paths ignored would be one that quietly claws the
+ * moves back at the next settle, which is worse than either honouring them or refusing
+ * them at the point they were earned.
  */
 export class MoveBudget {
+  #bank = MOVES.STARTING_BANK;
+
   constructor() {
-    this.bank = MOVES.STARTING_BANK;
     this.beginStage(1, 0);
+  }
+
+  /** Never negative, never above the cap, however and by whom it is written. */
+  get bank() {
+    return this.#bank;
+  }
+
+  set bank(value) {
+    this.#bank = Math.max(0, Math.min(MOVES.BANK_MAX, value));
   }
 
   beginStage(ideal, bonus) {
@@ -38,9 +54,18 @@ export class MoveBudget {
     this.used += cost;
   }
 
-  /** Moves earned mid-stage, e.g. by landing a full chain. Straight into the bank. */
+  /**
+   * Moves earned mid-stage, e.g. by landing a full chain. Straight into the bank, and
+   * wasted if it is already full — the same bargain as picking up ammo at full capacity,
+   * and the reason to spend down rather than sit on it.
+   */
   grant(moves = 1) {
     this.bank += moves;
+  }
+
+  /** True while spare moves are being thrown away, which the HUD says out loud. */
+  get bankFull() {
+    return this.bank >= MOVES.BANK_MAX;
   }
 
   /** Moves left in this stage's own grant, before the bank is touched. */
@@ -68,11 +93,12 @@ export class MoveBudget {
 
   /**
    * Closes out a solved stage. A positive balance banks; a negative one (the player
-   * overdrew) is deducted. Returns the signed carry for the results panel.
+   * overdrew) is deducted. Returns the signed carry — what the stage was worth, not what
+   * the bank could take of it, so a full bank is visible as a carry that went nowhere.
    */
   settleStage() {
     const carried = this.budget - this.used;
-    this.bank = Math.max(0, this.bank + carried);
+    this.bank += carried;
     return carried;
   }
 }

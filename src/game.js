@@ -1,6 +1,8 @@
-import { COMBO, CURSED, INTERLUDE, ROPE } from './config.js';
+import { ComboRun } from './combo.js';
+import { COMBO, COMBO_TOTAL_Y, CURSED, INTERLUDE, ROPE } from './config.js';
 import {
   expectedTime,
+  poolFraction,
   recordClear,
   runsCounted,
   slackFor,
@@ -14,7 +16,7 @@ import { MoveBudget } from './moves.js';
 import { colorConvergence, stagePalette } from './palette.js';
 import { saveProgress } from './progress.js';
 import { makeRng, hashSeed } from './rng.js';
-import { comboName, comboWindow, cursedStep, ScoreKeeper } from './scoring.js';
+import { comboName, ScoreKeeper } from './scoring.js';
 import { TangleTracker } from './tangle.js';
 
 const MAX_DT = 50; // ms — a backgrounded tab must not fast-forward the settle
@@ -31,23 +33,21 @@ const BANNER_HOLD_MS = 950;
 /** A killed combo needs longer — it has to shake, then fall out of frame. */
 const KILLED_BANNER_MS = 1500;
 
-/** How long the cursed readout's jump lasts each time the multiplier climbs. */
-const CURSED_POP_MS = 340;
-
 /** Largest slice of a drag applied before length constraints run again. */
 const SUBSTEP_LIMIT = 8;
 
-/**
- * Where the combo total sits, and therefore where knot scores fly to. Directly under the
- * decay bar: the bar is how long you have, the number below it is what you would lose.
- */
-const COMBO_ANCHOR_Y = 128;
-
 export class Game {
-  constructor({ renderer, hud, progress, baseSeed, debug, phone = false }) {
+  constructor({ renderer, hud, progress, pool = null, baseSeed, debug, phone = false }) {
     this.renderer = renderer;
     this.hud = hud;
     this.progress = progress;
+    /**
+     * The shared pool, or null to play entirely off this device's own times — which is
+     * what the tests and any offline harness do, and is the behaviour the game had before
+     * there was a pool. Never awaited: `pool.pars` is read synchronously on stage load and
+     * is whatever has arrived by then.
+     */
+    this.pool = pool;
     // A record written before the clock existed has no times, and the clock reads and
     // writes this on every stage. Nothing to migrate — an empty history is exactly a new
     // player's, so those stages simply run untimed again — but it has to be an object
@@ -76,15 +76,8 @@ export class Game {
     this.pending = null;
     this.explosions = [];
 
-    /** Normal rung: 0 nothing, 1 primed (starter half-done), >=2 a live chain. */
-    this.chain = 0;
-    /** 0 while normal; >=COMBO.CURSED_BASE once the curse has taken the chain over. */
-    this.cursedMult = 0;
-    /** Which black rope the run is feeding on, and therefore which one a x10 blows. */
-    this.curseTarget = -1;
-    /** Counts down after each climb of the multiplier; drives the readout's jump. */
-    this.cursedPop = 0;
-    this.chainTimer = 0;
+    /** The running combo: knots taken, the curse, and the window. See combo.js. */
+    this.combo = new ComboRun();
 
     this.grab = null;
     this.settle = null;
@@ -98,6 +91,18 @@ export class Game {
     this.interlude = null;
     /** Holds the sequence where it stands. Only ever set from the PAUSE button. */
     this.paused = false;
+  }
+
+  /**
+   * The pooled par table as it stands right now.
+   *
+   * Read fresh on every stage load rather than captured once, because the pool hydrates
+   * from localStorage before the first board and refreshes from the network some unknown
+   * moment later. An empty object is the honest answer until then, and it means exactly
+   * what it meant before the pool existed: nothing pooled, use your own times.
+   */
+  #pars() {
+    return this.pool?.pars ?? {};
   }
 
   // --- lifecycle -------------------------------------------------------------
@@ -118,11 +123,7 @@ export class Game {
     this.explosions.length = 0;
     this.banner = null;
     this.pending = null;
-    this.chain = 0;
-    this.cursedMult = 0;
-    this.curseTarget = -1;
-    this.cursedPop = 0;
-    this.chainTimer = 0;
+    this.combo.clear();
 
     // A layout that generated with zero knots would be solved on arrival; walk the
     // seed forward until we get a real puzzle.
@@ -155,9 +156,9 @@ export class Game {
     this.tracker = new TangleTracker(this.ropes);
     this.score.beginStage(Math.hypot(this.width, this.height));
     this.budget.beginStage(info.moves.ideal, info.moves.bonus);
-    // Null for a stage the player has never cleared, which is what makes a first look at
-    // a board untimed — see deadline.js.
-    this.clock.begin(stageDeadline(stage, this.progress.times));
+    // Null only for a stage nobody has ever cleared — the pool answers first and this
+    // player's own history answers when it cannot. See deadline.js.
+    this.clock.begin(stageDeadline(stage, this.progress.times, this.#pars()));
     this.tracker.collectPoints(this.knotMarkers);
     this.state = 'intro';
   }
@@ -379,7 +380,7 @@ export class Game {
       // be able to take that back. The fumble is about where they let go: the settle is
       // unscored relaxation the game applies, so a rope that drifts onto a neighbour
       // during it is not the player parking it there.
-      late: this.#chainRunning() && this.chainTimer <= 0,
+      late: this.combo.running && this.combo.lapsed,
       created: this.tracker.createdSinceMark(),
       // The stage clock, judged at the same instant and for the same reason. A rope
       // released with a moment to spare has landed, and the settle running on past the
@@ -435,20 +436,6 @@ export class Game {
 
   // --- the combo ------------------------------------------------------------------------
 
-  /** A run exists from the first knot onward — that is when the clock starts. */
-  #chainRunning() {
-    return this.chain >= 1;
-  }
-
-  #cursed() {
-    return this.cursedMult >= COMBO.CURSED_BASE;
-  }
-
-  /** How fast the window burns. A cursed combo doubles the reward and the pressure both. */
-  #burnRate() {
-    return this.#cursed() ? COMBO.CURSED_BURN : 1;
-  }
-
   /**
    * One qualifying drop.
    *
@@ -464,37 +451,28 @@ export class Game {
    * one the run was actually fed on, not whichever happens to sit first in the array.
    */
   #advance(points, curse, weight) {
-    const running = this.chain >= 1;
+    const wasRunning = this.combo.running;
 
     for (const point of points) {
       const gained = this.score.addKnot(weight);
-      this.chain += 1;
+      this.combo.knot();
       // Once the run is a combo the score flies up into the total; before that there is no
       // total to fly into, so it just rises where it was earned.
       this.flashes.push({
         x: point.x,
         y: point.y,
         toX: this.width / 2,
-        toY: COMBO_ANCHOR_Y,
-        fly: this.chain >= COMBO.SHOW_FROM,
+        toY: COMBO_TOTAL_Y,
+        fly: this.combo.chain >= COMBO.SHOW_FROM,
         text: `+${Math.round(gained)}`,
         life: FLASH_MS,
         total: FLASH_MS,
       });
     }
 
-    if (curse < 0) return;
-    // The cursed multiplier acts on the whole run, so there has to *be* a run: it cannot
-    // be opened cold, only on top of one already going.
-    if (!this.#cursed() && !running) return;
-    // Neutral at 1, and every rope hauled out of the field is worth the same as every
-    // other — the opener included. See cursedStep.
-    this.cursedMult = (this.#cursed() ? this.cursedMult : 1) + cursedStep(weight);
-    this.curseTarget = curse;
-    // The multiplier climbing *is* the reward, and a number that changes in place is easy
-    // to miss underneath the shake the cursed readout already carries. Only fires when the
-    // multiplier moves — an ordinary knot taken mid-curse climbs the rung, not this.
-    this.cursedPop = CURSED_POP_MS;
+    // Opening it cold is refused inside the run itself: the multiplier acts on everything
+    // accrued, so there has to be something to act on.
+    this.combo.climb(curse, weight, wasRunning);
   }
 
   /** One point per knot resolved, at the midpoint between the two ropes it joined. */
@@ -542,7 +520,7 @@ export class Game {
    * else, and a run detonates once.
    */
   #detonateCursed() {
-    const target = this.curseTarget;
+    const target = this.combo.curseTarget;
     const index =
       target >= 0 && this.ropes[target]?.cursed && !this.ropes[target].removed
         ? target
@@ -613,10 +591,42 @@ export class Game {
         break;
 
       default:
-        this.interlude = null;
-        this.hud.hideInterlude();
-        this.state = 'playing';
+        this.#beginPlay();
     }
+  }
+
+  /**
+   * Hands the board over.
+   *
+   * Shared by the countdown running out and by the skip button, so skipping is the same
+   * door rather than a thinner one beside it. `paused` is dropped here rather than at the
+   * two call sites because only one of them can reach this held: the sequence cannot tick
+   * its way to the end while paused, but the skip button is still clickable.
+   */
+  #beginPlay() {
+    this.interlude = null;
+    this.paused = false;
+    this.hud.setPaused(false);
+    this.hud.hideInterlude();
+    this.state = 'playing';
+  }
+
+  /**
+   * Skips the rest of the sequence and starts the stage now.
+   *
+   * The CLEARED card is the one phase carrying work rather than just time: the next board
+   * is not built until it ends (see #updateInterlude). So skipping from there has to *do*
+   * that build rather than jump over it — otherwise the player is handed back the stage
+   * they just solved, already clear, with a clock running on nothing to do. Everything the
+   * cleared stage earned was banked before the card ever went up, so nothing is lost by
+   * cutting it short.
+   *
+   * Every other phase is a wait with a finished board already behind the panel.
+   */
+  skipInterlude() {
+    if (!this.interlude) return;
+    if (this.interlude.phase === 'cleared') this.loadStage(this.stage + 1);
+    this.#beginPlay();
   }
 
   // --- simulation ------------------------------------------------------------
@@ -633,7 +643,7 @@ export class Game {
       this.flashes[i].life -= dt;
       if (this.flashes[i].life <= 0) this.flashes.splice(i, 1);
     }
-    if (this.cursedPop > 0) this.cursedPop = Math.max(0, this.cursedPop - dt);
+    this.combo.fadePop(dt);
     if (this.banner) {
       this.banner.life -= dt;
       if (this.banner.life <= 0) this.banner = null;
@@ -666,12 +676,12 @@ export class Game {
     // made a double reachable at a stroll: the first link sat armed indefinitely, so any
     // second drop, whenever it came, opened the chain. The clock has to be running for the
     // starter itself, or the starter is not a starter.
-    if (this.#chainRunning() && this.state === 'playing') {
-      this.chainTimer = Math.max(0, this.chainTimer - dt * this.#burnRate());
+    if (this.combo.running && this.state === 'playing') {
+      const lapsed = this.combo.tick(dt);
       // Only an *idle* lapse cashes here. A rope already dropped is a landing #endGesture
       // has not scored yet — it latched its own verdict at the drop — and a rope still in
       // hand is a move not yet made. Cashing under either would kill a chain from behind.
-      if (this.chainTimer <= 0 && !this.grab && !this.settle) this.#cashCombo(false);
+      if (lapsed && !this.grab && !this.settle) this.#cashCombo(false);
     }
 
     const knots = this.tracker ? this.tracker.count : 0;
@@ -685,16 +695,17 @@ export class Game {
       // spent and knots are still on the board, every further move comes out of savings
       // — so the warning has to be up before the player commits to one, not after.
       drawingFromBank: this.budget.stageLeft === 0 && knots > 0,
+      // At the cap, so anything this stage does not spend is thrown away on the way out.
+      // Silent discarding would read as the carry being broken.
+      bankFull: this.budget.bankFull,
       // Infinity on a stage with no record, which the readout shows as such. There is no
       // separate "untimed" flag to keep in step with the number.
       timeLeft: this.clock.remaining,
       // Projected, not banked: the pot is the player's, it is just not final yet.
-      score: this.score.projected(this.cursedMult),
-      chain: this.chain,
-      cursedMult: this.cursedMult,
-      chainFraction: this.#chainRunning()
-        ? this.chainTimer / comboWindow(this.chain)
-        : 0,
+      score: this.score.projected(this.combo.cursedMult),
+      chain: this.combo.chain,
+      cursedMult: this.combo.cursedMult,
+      chainFraction: this.combo.fraction,
     });
   }
 
@@ -771,18 +782,11 @@ export class Game {
    * stranded. A chain still in its starter has nothing to pay and goes quietly.
    */
   #cashCombo(forfeited) {
-    const rung = this.chain;
-    const cursedMult = this.cursedMult;
-    const wasCursed = this.#cursed();
+    // One call both snapshots and resets, so there is no window in which the run has been
+    // paid out but its multiplier, target or half-finished jump are still live.
+    const { rung, cursedMult, cursed: wasCursed } = this.combo.end();
 
     const cash = this.score.cashCombo(cursedMult, forfeited);
-    this.chain = 0;
-    this.cursedMult = 0;
-    // The target dies with the run that chose it: the next run picks its own black rope.
-    this.curseTarget = -1;
-    // A jump left mid-flight would land on whatever the next run puts in the slot.
-    this.cursedPop = 0;
-    this.chainTimer = 0;
     if (!cash) return null;
 
     // The one and only callout a combo gets. It used to fire twice — once on landing the
@@ -831,13 +835,13 @@ export class Game {
     const qualifies = resolved > 0 && created === 0;
 
     if (qualifies) {
-      const before = this.cursedMult;
+      const before = this.combo.cursedMult;
       this.#advance(this.#knotPoints(events), curse, weight);
 
       // A cursed combo carried to MAX blows the black rope off the board and banks a move.
       // Its freed knots are knots this drop took, so they join the same run — at flat
       // weight, since no rope was hauled to get them.
-      if (before < COMBO.MAX && this.cursedMult >= COMBO.MAX) {
+      if (before < COMBO.MAX && this.combo.cursedMult >= COMBO.MAX) {
         this.budget.grant(COMBO.REWARD_MOVES);
         this.hud.showBankDelta(COMBO.REWARD_MOVES);
         if (this.#detonateCursed()) {
@@ -848,7 +852,7 @@ export class Game {
       }
 
       // Reset on every knot, and measured from the drop that earned it.
-      this.chainTimer = comboWindow(this.chain);
+      this.combo.refresh();
     } else {
       // A fumble strips the cursed multiplier; a drop that untangled nothing banks in full.
       this.#cashCombo(created > 0);
@@ -927,9 +931,16 @@ export class Game {
     this.stageScores.set(this.stage, score);
     const runTotal = [...this.stageScores.values()].reduce((sum, v) => sum + v, 0);
 
-    // Filed before anything else can touch the clock, and filed for the untimed first
-    // clear above all — that clear is the only reason the stage can ever be timed at all.
-    recordClear(this.progress.times, this.stage, this.clock.elapsed);
+    // Filed before anything else can touch the clock. The local record is still kept for
+    // every clear: it is what the deadline falls back to with no network, and it is what
+    // CLOCK.OWN_FLOOR reads to keep a pooled deadline from going tighter than a time this
+    // player has actually hit.
+    const filed = recordClear(this.progress.times, this.stage, this.clock.elapsed);
+    // Contributed to everyone else's par, and deliberately not awaited — this runs inside
+    // scoring a solved stage, and the time affects the next player rather than this run.
+    // The clamped number goes up rather than the raw one, so a stage left open while the
+    // player answered the door is not what the pool learns from.
+    this.pool?.submit(this.stage, filed);
 
     this.progress.best[key] = Math.max(previousBest, score);
     this.progress.maxStage = Math.max(this.progress.maxStage, this.stage);
@@ -958,16 +969,16 @@ export class Game {
       flashes: this.flashes,
       banner: this.banner,
       explosions: this.explosions,
-      chain: this.chain,
-      cursedMult: this.cursedMult,
-      comboValue: this.score.comboValue(this.cursedMult),
+      chain: this.combo.chain,
+      cursedMult: this.combo.cursedMult,
+      comboValue: this.score.comboValue(this.combo.cursedMult),
       comboShowFrom: COMBO.SHOW_FROM,
       // Cursed runs only — see comboName. Empty the rest of the time, which is what keeps
       // the normal indicator down to a knot count and a number.
-      comboName: this.#cursed() ? comboName(this.cursedMult) : '',
+      comboName: this.combo.cursed ? comboName(this.combo.cursedMult) : '',
       // 1 on the frame the multiplier climbed, easing to 0. The renderer owns the shape of
       // the jump; the game only says when it was struck.
-      cursedPop: this.cursedPop / CURSED_POP_MS,
+      cursedPop: this.combo.pop,
       grabbedId: this.grab ? this.ropes[this.grab.ropeIndex].id : -1,
       showMarkers: this.progress.options.markers,
       margin: this.margin,
@@ -994,9 +1005,9 @@ export class Game {
         ? `difficulty ${info.difficulty.toFixed(1)}  fits ${info.fits}  colour-converge ${(colorConvergence(this.stage, this.progress.options.distinct) * 100).toFixed(0)}%`
         : '',
       `travel ${this.score.distancePx.toFixed(0)}px  points ${this.score.points.toFixed(1)}  per-move ${this.score.perMove.toFixed(1)}  bestCombo x${this.score.bestCombo}`,
-      `combo x${this.chain}${this.#cursed() ? `  CURSED x${this.cursedMult}` : ''}` +
-        `  knots ${this.score.comboKnots}  accrued ${this.score.comboScore.toFixed(0)}  shown ${this.score.comboValue(this.cursedMult).toFixed(0)}` +
-        `  window ${this.chainTimer.toFixed(0)}ms  burn x${this.#burnRate()}`,
+      `combo x${this.combo.chain}${this.combo.cursed ? `  CURSED x${this.combo.cursedMult}` : ''}` +
+        `  knots ${this.score.comboKnots}  accrued ${this.score.comboScore.toFixed(0)}  shown ${this.score.comboValue(this.combo.cursedMult).toFixed(0)}` +
+        `  window ${this.combo.chainTimer.toFixed(0)}ms  burn x${this.combo.burnRate}`,
       // Spelled out end to end, because "where did that number come from" is the one
       // question a self-calibrating deadline has to be able to answer on demand.
       `clock ${(this.clock.elapsed / 1000).toFixed(1)}s / ` +
@@ -1006,6 +1017,12 @@ export class Game {
         ` (struck ${slowestStruck(this.stage)})` +
         `  avg ${((expectedTime(this.stage, this.progress.times) || 0) / 1000).toFixed(1)}s` +
         `  slack ${slackFor(this.stage).toFixed(2)}`,
+      // Which population answered, now that two can. A deadline that feels wrong is the
+      // first thing anyone will want to attribute, and "pooled or mine" is the first cut.
+      `pool ${this.#pars()[String(this.stage)] ? `par ${(this.#pars()[String(this.stage)] / 1000).toFixed(1)}s` : 'no par'}` +
+        ` (${Object.keys(this.#pars()).length} stages` +
+        `${this.pool?.outbox.length ? `, ${this.pool.outbox.length} unsent` : ''})` +
+        `  fraction ${poolFraction(this.stage).toFixed(2)}`,
       `state ${this.state}${this.grab ? '  grabbing' : ''}${this.settle ? '  settling' : ''}`,
     ].filter(Boolean);
   }

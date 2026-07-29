@@ -6,19 +6,24 @@ Every stage grants a limited number of moves. Spend fewer than you're given and 
 bank for later; run the stage grant *and* the bank dry without solving and the stage is
 lost. Rip several knots apart with one pull for a combo.
 
-There is also a clock, and it is one you set yourself: a stage you have never cleared is
-untimed, and the time it took you becomes the deadline you're held to next time — with
-progressively less of it handed back as the stages get harder.
+There is also a clock, and nobody picked its numbers: a stage's deadline is what clearing
+it actually takes, pooled across everyone who plays, with progressively less of it handed
+back as the stages get harder.
 
 Vanilla JS, Canvas 2D, native ES modules. No dependencies, no build step.
 
 ## Run
 
 ```bash
-python3 -m http.server 8000   # or: npm start
+npm start
 ```
 
-Then open <http://localhost:8000>.
+Then open <http://localhost:8000>. That serves the game *and* the pool API from one
+dependency-free Node server; times are kept in `server/data/pool.json`.
+
+The game still works as plain static files with no server at all — it falls back to the
+clear times on the device, which is also what happens whenever the API is unreachable.
+`?pool=0` forces that path.
 
 ## Test
 
@@ -41,8 +46,32 @@ the rules about *when* it is read, which are driven through a real `Game`.
 | `?seed=123` | Fixes the run seed, so every stage generates identically. |
 | `?stage=7` | Skips the title screen and loads straight into that stage. |
 | `?phone=1` | Forces the phone board (half the ropes) on or off, without a phone. |
+| `?pool=0` | Ignores the shared pool; the clock runs off this device's own times alone. |
 
 `?seed=123&stage=7&debug=1` reproduces one exact layout, every time.
+
+## The pool API
+
+Two endpoints, same origin by default — point `POOL.BASE_URL` elsewhere to split the game
+off onto a CDN, and the CORS headers are already there for it.
+
+| Route | Body | Effect |
+| --- | --- | --- |
+| `GET /api/pars` | — | `{ pars: { "7": { ms, n } } }` — one already-trimmed par per stage. Cached, and publicly cacheable for `POOL.PARS_MAX_AGE_S`. |
+| `POST /api/times` | `{ stage, ms }` or `{ times: [...] }` | Files clear times. Returns `{ stored, received }`. |
+
+The batch form exists because the client holds times it couldn't send and drains them
+together. A submission is bounded (`POOL.MIN_MS`/`MAX_MS`) and clamped toward its stage's
+typical time. Reads and writes share one per-IP rate limit — the read is the expensive
+endpoint, since it sorts every sample of every stage, so leaving it unmetered had it
+backwards. None of that is real anti-cheat — nothing client-submitted can be — it is there
+so one bad or forged number cannot poison a stage for everyone else.
+
+| Env | Effect |
+| --- | --- |
+| `PORT` | Listen port (default 8000). |
+| `UNTANGLE_DATA` | Pool file (default `server/data/pool.json`). |
+| `UNTANGLE_TRUST_PROXY=1` | Read the client IP from `X-Forwarded-For`. Only behind a proxy that sets it — in front of one, it lets anyone forge their way around the rate limit. |
 
 ## How it works
 
@@ -69,10 +98,28 @@ removal leaves the rest crossing-free. That is exactly **minimum weighted vertex
 on the knot graph (`src/solver.js`), computed exactly by branch-and-bound. The stage
 grants `ceil(cover × SLACK)`; whatever is unspent banks.
 
-**The stage clock has no starting time**, because it isn't given one. A stage you have
-never cleared runs **untimed** — the clock only measures it — and that measurement is what
-puts a deadline on every later attempt. The game has no opinion about how long a board
-should take; it only has a record of how long *you* take (`src/deadline.js`).
+**The bank is a cushion, not savings**, and it is capped at 6. Uncapped it compounded —
+the slack is a *proportional* margin on a cover that grows all run, so a clean player
+banked one spare move a stage early on and four a stage by stage 20, reaching 37 and still
+climbing. That is more spare moves than any single stage costs, so the budget stopped being
+a constraint somewhere in the teens. The cap alone would pin everyone to the ceiling and
+make the readout say the same thing about all of them, so the slack came down with it:
+
+| after 20 stages | clean play | 10% over par | 20% over par |
+| --- | --- | --- | --- |
+| bank | 6 (capped) | 3 | 0 |
+
+Spare moves above the cap are lost rather than deferred, including moves earned by a x10
+detonation — the stat outlines itself while the bank is full, so the discard is visible
+and there is a reason to spend down.
+
+**The stage clock has no starting time**, because it isn't given one. The game has no
+opinion about how long a board should take; it only has a record of how long it takes
+people (`src/deadline.js`). The **shared pool** answers first — every clear anyone submits
+is filed against its stage, and the server sends back one par per stage — and the times on
+your own device answer when it can't, which covers a first load offline, a dead server, and
+a stage further out than anyone has reached. A stage *nobody* has ever cleared still runs
+**untimed**, the clock only measuring it.
 
 The model is three steps and nothing else. **Trim** the extremes off the stage's recorded
 times — top and bottom 10%, so the run interrupted by the doorbell and the freak lucky
@@ -96,14 +143,28 @@ one, where it stops. With twelve runs on record from 42s to 75s:
 | runs counted | 10 | 7 | 5 | 3 | 1 |
 | deadline | 0:59 | 0:54 | 0:51 | 0:48 | **0:45** |
 
-**This is why there is no floor anywhere in the clock.** Every deadline it can produce is
-the mean of runs you actually completed on that stage, so the tightest one it can ever
-reach is a single time you have already proved you can hit. A model built only from
-measurements cannot describe an impossible stage, so it needs nothing protecting it from
-one — and trimming the *fast* end is what stops a freak clear becoming that permanent
-target. Only clears are recorded; a stage lost to the clock teaches it nothing, which is
-the point — filing it would teach the model that the stage takes exactly as long as the
-deadline it just failed.
+Against the pool that same curve is expressed as a **fraction** rather than a count. One
+run struck per stage means something on a twenty-run personal window; struck off four
+hundred pooled runs it is a rounding error, and the entire late game would quietly stop
+biting. So the pooled path takes the fastest `poolFraction(stage)` of what survives the
+trim — the same proportion the count represents on a full personal window — and gets an
+identical curve at any sample size. Change one and you must change the other.
+
+**The clock used to need no floor, and the pool is what cost it that.** When every deadline
+was the mean of runs *you* completed, the tightest one reachable was a time you had already
+proved you could hit: a model built only from your own measurements cannot describe a stage
+you personally cannot clear. A pooled mean can, and for anyone below the playerbase's middle
+it routinely will. So the invariant is back as an explicit guard rather than a property of
+the data — `CLOCK.OWN_FLOOR` keeps a pooled deadline from ever going tighter than your own
+fastest clear of that stage. It can only loosen a deadline, and it does nothing at all on a
+stage you have never cleared, which is exactly the case it cannot rescue and the real price
+of pooling.
+
+Only clears are recorded, locally and in the pool; a stage lost to the clock teaches
+neither anything, which is the point — filing it would teach the model that the stage takes
+exactly as long as the deadline it just failed. Trimming the *fast* end is what stops a
+freak clear becoming a permanent target, and a submitted time is clamped toward its stage's
+typical one before it lands, so a single forged run cannot drag a stage's par down after it.
 
 The clock stops behind an open dialog, and the deadline is judged **at the drop**: a rope
 released with a tenth of a second to spare has landed, and the unscored settle running on
