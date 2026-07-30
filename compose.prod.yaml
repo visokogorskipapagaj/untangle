@@ -1,0 +1,35 @@
+# The deploy target's compose file. This and nothing else needs to be on the box — no
+# checkout, no Node, no build: CI has already built and tested the image.
+#
+#   docker compose -f compose.prod.yaml pull
+#   docker compose -f compose.prod.yaml up -d
+#
+# Pull rather than push, because the box sits behind a Cloudflare tunnel and has no inbound
+# route for a workflow to deploy into. Outbound HTTPS to ghcr.io is all it needs.
+services:
+  untangle:
+    # Overridable so a failed deploy can bring the previous image back by id — see
+    # deploy/deploy.sh. Unset, which is every normal deploy, it follows `latest`.
+    image: ${UNTANGLE_IMAGE:-ghcr.io/visokogorskipapagaj/untangle:latest}
+    restart: unless-stopped
+
+    environment:
+      # cloudflared is the only thing that reaches this, so the player's address arrives in
+      # a header rather than on the socket. Without it every player shares one rate-limit
+      # bucket — the tunnel's — and one busy client locks the rest out.
+      UNTANGLE_TRUST_PROXY: "1"
+
+    volumes:
+      # The one piece of state, and the reason this is a volume rather than a bind mount: a
+      # deploy replaces the image wholesale, and the pool has to survive that. Losing it
+      # resets everyone's stage times.
+      - untangle-pool:/data
+
+    # Loopback only. cloudflared runs on the host and reaches it here; nothing on the
+    # network can. If cloudflared is itself a container, drop this and put both services on
+    # a shared network instead, so the port is never published at all.
+    ports:
+      - "127.0.0.1:8000:8000"
+
+volumes:
+  untangle-pool:

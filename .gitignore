@@ -6,3 +6,10 @@ node_modules/
 
 # Build output. `npm start` regenerates it, and the Dockerfile builds it in its own stage.
 dist/
+
+# Secrets. Vite loads .env on every build, and anything named VITE_* is inlined into the
+# client bundle — so a token that lands here and gets committed is published twice over.
+# .env.example is the tracked one: names and shapes, never values.
+.env
+.env.*
+!.env.example

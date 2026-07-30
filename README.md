@@ -79,30 +79,39 @@ times. Nothing else needs backing up.
 
 ### Push to deploy
 
-`deploy/post-receive` makes `git push` the whole deployment. On the server:
-
-```bash
-git init --bare ~/untangle.git
-curl -o ~/untangle.git/hooks/post-receive ...   # or copy deploy/post-receive across
-chmod +x ~/untangle.git/hooks/post-receive
+```
+git push origin main
+  -> typecheck, 333 tests                     (GitHub runner)
+  -> build image, push to ghcr.io             (GitHub runner)
+  -> back up the pool, pull, health-check     (the box)
 ```
 
-and from a clone:
+`.github/workflows/ci.yml` runs all three. Every push and PR gets the first stage; only
+`main` gets the other two, and each waits on the one before it, so an image in the registry
+is one that passed and a deployed image is one that was published.
 
-```bash
-git remote add prod user@host:untangle.git
-git push prod main
-```
+The last stage runs on a **self-hosted runner on the box**, which is what makes this work at
+all: the box sits behind a Cloudflare tunnel and has no inbound route, so nothing can deploy
+*into* it. A runner dials out. That also means no SSH key and no Access token in this
+repository's secrets — publishing uses the built-in `GITHUB_TOKEN`, and the deploy end holds
+no credential at all.
 
-The hook checks the branch out into the app directory and runs the compose build. The host
-needs Docker and nothing else — no Node, no npm, no `npm ci` — because the build happens in
-the image's own stage.
+Do not put a self-hosted runner on a public repository. Any fork's pull request can execute
+code on it.
 
-Deliberately git rather than rsync, for one reason: `checkout -f` leaves ignored and
-untracked files alone, so `server/data/` cannot be caught by a deploy. `rsync --delete`
-would take it, and that is everyone's stage times. Under compose the pool is a named volume
-and further out of reach still; migrating an existing one into it is a `docker cp` of
-`pool.json` to `/data/pool.json` in the running container.
+The box needs Docker and a runner. Not Node, not npm, not a checkout of the source — the
+image is already built and tested when it arrives. `compose.prod.yaml` is what runs there,
+and it comes from the workflow's own checkout so it cannot drift from what is in git.
+
+`deploy/deploy.sh` is the deploy: it copies `pool.json` out of the volume first, pulls, waits
+for `/api/pars` to answer, and on a timeout puts the previous image back by id and exits
+non-zero. Pooled times are the only state that cannot be regenerated — everything else in
+the container is rebuilt from source on every deploy, and they are not. Backups land in
+`~/untangle-backups`, twenty deep.
+
+One property worth knowing: the store flushes on SIGTERM, so up to two seconds of times live
+only in memory. `docker compose up -d` stops the old container gracefully, so a deploy keeps
+them. A `docker kill` would not.
 
 Behind an existing nginx, as a **subdomain** — nothing in the app needs changing:
 
