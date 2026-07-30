@@ -6,6 +6,12 @@
 #
 # Pull rather than push, because the box sits behind a Cloudflare tunnel and has no inbound
 # route for a workflow to deploy into. Outbound HTTPS to ghcr.io is all it needs.
+# Pinned, and load-bearing. Compose otherwise names the project after whatever directory it
+# was run from — which on the runner is a checkout path nobody chose — and the volume below
+# is named after the project. A changed path would mean a new, empty volume and every pooled
+# clear time stranded in the old one.
+name: untangle
+
 services:
   untangle:
     # Overridable so a failed deploy can bring the previous image back by id — see
