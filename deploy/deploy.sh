@@ -8,8 +8,45 @@
 # the pool and without leaving a broken container up.
 set -eu
 
-COMPOSE="docker compose -f compose.prod.yaml"
 SERVICE=untangle
+
+# ---- the runtime secrets ---------------------------------------------------------------
+#
+# The PostHog personal key and project id, which compose.prod.yaml substitutes into the
+# container's environment. They live in a file on the box rather than in this repository,
+# and specifically *outside* the checkout: `actions/checkout` cleans untracked files on
+# every run, so a `.env` next to the compose file would be deleted by the next deploy and
+# the stats would go quietly idle. `$HOME` survives.
+#
+# The file is plain `KEY=value` lines — see .env.example for the three names. Create it as
+# the user the runner runs as, with no sudo (it is that user's own home directory, and sudo
+# leaves it root-owned and unreadable by everything that needs it):
+#
+#   umask 177 && cat > ~/untangle.env <<'EOF'
+#   POSTHOG_PERSONAL_API_KEY=phx_...
+#   POSTHOG_PROJECT_ID=...
+#   POSTHOG_HOST=https://us.posthog.com
+#   EOF
+#
+# `$HOME` here is the *runner's* home, which is not necessarily the home of whoever set the
+# box up. If the runner is a service account, the file goes in its home rather than yours —
+# or set UNTANGLE_ENV_FILE to point elsewhere.
+#
+# Absent, the deploy proceeds without it. That is deliberate and it is the important part:
+# analytics is the least important thing this box does, and a missing secrets file must
+# never be the reason the game and the pool fail to come back up. /api/stats serves nulls.
+ENV_FILE=${UNTANGLE_ENV_FILE:-$HOME/untangle.env}
+
+COMPOSE="docker compose -f compose.prod.yaml"
+if [ -f "$ENV_FILE" ]; then
+  # Before -f, and both before the subcommand: these are flags to `docker compose` itself.
+  # Note $COMPOSE is deliberately unquoted everywhere below, so a path with spaces in it
+  # would split — keep this somewhere boring.
+  COMPOSE="docker compose --env-file $ENV_FILE -f compose.prod.yaml"
+  echo "runtime env from $ENV_FILE"
+else
+  echo "no $ENV_FILE — deploying without PostHog stats (the game is unaffected)"
+fi
 HEALTH_URL=${UNTANGLE_HEALTH_URL:-http://127.0.0.1:8000/api/pars}
 HEALTH_TIMEOUT=${UNTANGLE_HEALTH_TIMEOUT:-45}
 BACKUPS=${UNTANGLE_BACKUPS:-$HOME/untangle-backups}

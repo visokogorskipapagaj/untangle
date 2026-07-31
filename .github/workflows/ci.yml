@@ -68,6 +68,16 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # The browser's PostHog key, which Vite can only inline while the image is being
+          # built. A repository *variable* rather than a secret on purpose: this key is
+          # write-only and ships to every player anyway, and a secret here would be masked
+          # out of the logs while sitting in plain sight in the bundle — security theatre
+          # that makes a mistyped key harder to diagnose. The personal key that reads the
+          # project is not here at all; it is runtime config on the box, see compose.prod.yaml.
+          # Both unset simply build a game with analytics off.
+          build-args: |
+            VITE_POSTHOG_KEY=${{ vars.VITE_POSTHOG_KEY }}
+            VITE_POSTHOG_HOST=${{ vars.VITE_POSTHOG_HOST }}
           # The Dockerfile's install layer is keyed on the lockfile, so this skips `npm ci`
           # entirely on any build where dependencies did not move.
           cache-from: type=gha

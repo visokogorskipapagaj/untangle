@@ -4,7 +4,8 @@ import { createServer } from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { POOL } from '../src/config.js';
+import { ANALYTICS, POOL } from '../src/config.js';
+import { fromEnv as posthogFromEnv, stats } from './stats.js';
 import { PoolStore } from './store.js';
 
 /**
@@ -209,6 +210,22 @@ export function createApp(store) {
         return json(res, 200, { pars: store.pars() }, `public, max-age=${POOL.PARS_MAX_AGE_S}`);
       }
 
+      if (pathname === '/api/stats' && req.method === 'GET') {
+        // The whole point of the endpoint: the personal API key that produced these numbers
+        // stays on this side, and the client gets the numbers. Answered off the last
+        // refresh rather than by asking PostHog now, so this cannot be slower than the
+        // object it reads — see server/stats.js.
+        //
+        // Publicly cacheable for exactly one refresh interval. Longer would serve a number
+        // this process has already replaced; shorter would ask for one it cannot have yet.
+        return json(
+          res,
+          200,
+          { ...stats, live: stats.fetchedAt > 0 },
+          `public, max-age=${ANALYTICS.STATS_MAX_AGE_S}`,
+        );
+      }
+
       if (pathname === '/api/times' && req.method === 'POST') {
 
         let body;
@@ -255,6 +272,16 @@ export async function start(port = PORT, file = DATA_FILE) {
     console.warn(`[pool] no build at ${PUBLIC_DIR} — run \`npm run build\` (or \`npm start\`)`);
   }
 
+  /**
+   * The PostHog reader, if there is one to build. Not awaited: the first query goes out
+   * while the server is already listening, so a slow or unreachable PostHog delays the
+   * numbers and nothing else. Unconfigured, this is inert and `/api/stats` serves nulls.
+   */
+  const posthog = posthogFromEnv().start();
+  if (!posthog.configured) {
+    console.log('[stats] POSTHOG_PROJECT_ID / POSTHOG_PERSONAL_API_KEY unset — /api/stats is idle');
+  }
+
   const server = createServer((req, res) => {
     createApp(store)(req, res).catch((err) => {
       console.error(`[pool] ${req.method} ${req.url}: ${err.message}`);
@@ -268,6 +295,7 @@ export async function start(port = PORT, file = DATA_FILE) {
   for (const signal of ['SIGINT', 'SIGTERM']) {
     process.on(signal, () => {
       server.close();
+      posthog.stop();
       store.close().finally(() => process.exit(0));
     });
   }
@@ -275,7 +303,7 @@ export async function start(port = PORT, file = DATA_FILE) {
   await new Promise((ready) => server.listen(port, ready));
   const stages = Object.keys(store.stages).length;
   console.log(`[pool] http://localhost:${port} — ${stages} stage(s) pooled from ${file}`);
-  return { server, store };
+  return { server, store, posthog };
 }
 
 // Only when run directly, so the tests can import createApp without binding a port.

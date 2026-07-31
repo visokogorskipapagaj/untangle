@@ -7,8 +7,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "start": "npm run build && node server/index.js",
-    "serve": "node server/index.js",
+    "start": "npm run build && node --env-file-if-exists=.env server/index.js",
+    "serve": "node --env-file-if-exists=.env server/index.js",
+    "stats": "node --env-file-if-exists=.env server/stats-check.js",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --import ./test/support/register.js --test test/*.test.js"
   },
@@ -17,5 +18,8 @@
     "sass": "^1.102.0",
     "typescript": "^7.0.2",
     "vite": "^8.1.5"
+  },
+  "dependencies": {
+    "posthog-js": "^1.409.5"
   }
 }

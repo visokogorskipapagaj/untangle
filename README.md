@@ -41,13 +41,17 @@ index.html          a canvas and seven tags
 src/
   main.ts           boot: renderer, input, the frame loop
   hud.ts            the one object the game talks to about the screen
+  analytics.ts      PostHog capture, and the site numbers as a variable
   app.scss          the page, the playfield, the canvas
   *.js              the simulation — ropes, knots, solver, scoring, clock, pool
   ui/
     tokens.scss     the design system, and the only global styling
     base.ts         shadow root, adopted sheet, template
     <component>/    <component>.html + .scss + .ts
-server/             the pool API, and the static server for dist/
+server/
+  index.js          the pool API, /api/stats, and the static server for dist/
+  store.js          the pooled clear times
+  stats.js          the PostHog reader behind /api/stats
 ```
 
 Every element on screen is a component, and a component is three files named after its
@@ -81,10 +85,13 @@ times. Nothing else needs backing up.
 
 ```
 git push origin main
-  -> typecheck, 333 tests                     (GitHub runner)
+  -> typecheck, 345 tests                     (GitHub runner)
   -> build image, push to ghcr.io             (GitHub runner)
   -> back up the pool, pull, health-check     (the box)
 ```
+
+Nothing is built on the box and nothing is copied to it — the image arriving from ghcr.io is
+the deploy. Editing files in a folder there changes nothing.
 
 `.github/workflows/ci.yml` runs all three. Every push and PR gets the first stage; only
 `main` gets the other two, and each waits on the one before it, so an image in the registry
@@ -216,6 +223,91 @@ so one bad or forged number cannot poison a stage for everyone else.
 | `PORT` | Listen port (default 8000). |
 | `UNTANGLE_DATA` | Pool file (default `server/data/pool.json`). |
 | `UNTANGLE_TRUST_PROXY=1` | Read the client IP from `X-Forwarded-For`. Only behind a proxy that sets it — in front of one, it lets anyone forge their way around the rate limit. |
+
+## Analytics
+
+PostHog, in two halves that take two different keys. Copy `.env.example` to `.env` and fill
+it in; with nothing set the game runs exactly as it did before there was any of this, which
+is what a fresh checkout does.
+
+```bash
+npm run stats      # runs the three queries and prints what came back
+```
+
+That is the setup check. The server swallows every query failure on purpose — a game must
+not break over analytics — which is right in production and useless while wiring it up, so
+`npm run stats` runs the same three queries against the same endpoint and reports the errors
+`refresh()` throws away. It is read-only, and it prints a fingerprint of the key rather than
+the key. `npm start` and `npm run serve` read `.env` through Node's `--env-file-if-exists`;
+real environment variables take precedence over it, so compose's values still win in
+production.
+
+**Capturing** happens in the browser on the *project* key (`phc_…`), which is write-only and
+public by design — Vite inlines anything named `VITE_*` into `dist/`, so it ships to every
+player on purpose. `posthog-js` is 229kB against the game's own 83kB, so it is imported
+dynamically and lives in its own chunk: with no key configured the fetch never happens.
+
+**Reading the numbers back** happens on the server on a *personal* key (`phx_…`, scope
+`query:read`), which can read the whole project and therefore never goes near the client.
+`server/stats.js` runs three HogQL queries every `ANALYTICS.REFRESH_MS` and keeps the answers
+in one exported `stats` object; `/api/stats` serves that object, so the client gets numbers
+and never the key that produced them.
+
+| Route | Effect |
+| --- | --- |
+| `GET /api/stats` | `{ totalVisitors, currentVisitors, avgSessionSeconds, fetchedAt, live }`. Answered off the last refresh, so it is never slower than the object it reads. Publicly cacheable for `ANALYTICS.STATS_MAX_AGE_S`. |
+
+The numbers are `null` until a query lands, and `null` is deliberately not `0`: a project
+with no traffic reports zero visitors, a project with a bad key reports nothing, and `live`
+is what separates the two. Each query fails independently and leaves its own number alone —
+so an empty `sessions` table costs the average and not the visitor counts, and an outage
+costs freshness rather than correctness.
+
+| Env | Effect |
+| --- | --- |
+| `VITE_POSTHOG_KEY` | Project key, **build time only** — Vite inlines it, so it is a `--build-arg` in the Dockerfile, not a runtime variable. Unset disables capture. |
+| `VITE_POSTHOG_HOST` | Ingest host (default `https://us.i.posthog.com`). |
+| `POSTHOG_PERSONAL_API_KEY` | Personal key, runtime. Never `VITE_*`. Unset leaves `/api/stats` idle. |
+| `POSTHOG_PROJECT_ID` | The number in the dashboard URL. |
+| `POSTHOG_HOST` | Query host — the **app** host (default `https://us.posthog.com`), which is not the ingest host above. Pointing this at `us.i.posthog.com` 404s on a URL that looks right. |
+
+Region has to match the key on both: an EU key against a US host authenticates and then
+reports an empty project, which reads as "no traffic yet" rather than as the mistake it is.
+
+### In production
+
+The two halves are delivered by two different routes, because they are needed at two
+different times.
+
+The browser key is needed **at image build time** — Vite can only inline it then — so it is
+a GitHub repository *variable* (`VITE_POSTHOG_KEY`, `VITE_POSTHOG_HOST`) that CI passes to
+`docker build` as a build arg. A variable rather than a secret on purpose: it ships to every
+player anyway, and masking it in the logs would only make a typo harder to diagnose.
+
+The server keys are needed **at container run time** and must never enter the image, so they
+live on the box in `~/untangle.env`, which `deploy/deploy.sh` passes to compose with
+`--env-file`:
+
+```bash
+# on the box, as the user the runner runs as — no sudo, it is that user's own home
+umask 177 && cat > ~/untangle.env <<'EOF'
+POSTHOG_PERSONAL_API_KEY=phx_...
+POSTHOG_PROJECT_ID=...
+POSTHOG_HOST=https://us.posthog.com
+EOF
+```
+
+Two ways to get this wrong, both of which end in the stats staying idle with no error worth
+reading. `sudo` leaves the file root-owned and unreadable by the runner. And `$HOME` is the
+*runner's* home, which is not necessarily yours — if the runner is a service account, put
+the file in its home, or point `UNTANGLE_ENV_FILE` wherever you like. `deploy.sh` prints
+which of the two paths it took on every deploy, so the log says which happened.
+
+Outside the checkout deliberately — `actions/checkout` cleans untracked files, so a `.env`
+beside `compose.prod.yaml` would be deleted by the next deploy. If the file is absent the
+deploy still proceeds and `/api/stats` serves nulls; analytics must never be the reason the
+game and the pool fail to come back up. For the same reason the deploy health check stays on
+`/api/pars` — gating it on `/api/stats` would roll the site back over a PostHog outage.
 
 ## How it works
 

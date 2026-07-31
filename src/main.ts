@@ -1,5 +1,6 @@
 import './app.scss';
 
+import { refreshSiteStats, siteStats, startAnalytics } from './analytics.ts';
 import { STAGE } from './config.js';
 import { Game } from './game.js';
 import { Hud } from './hud.ts';
@@ -55,6 +56,17 @@ const progress = loadProgress();
  */
 const pool = params.get('pool') === '0' ? null : new Pool();
 pool?.sync().catch(() => {});
+
+/**
+ * PostHog, and the numbers it reports back.
+ *
+ * Started before the game so the pageview both visitor counts are derived from is sent for
+ * a player who loads the page and closes it again. The stats fetch is pointedly not awaited,
+ * for the same reason the pool's sync is not: nothing below needs it, and three numbers
+ * nobody is looking at yet must not hold up the title screen.
+ */
+startAnalytics().catch(() => {});
+refreshSiteStats().catch(() => {});
 
 const hud = new Hud({
   onStart: () => game.start(1),
@@ -121,8 +133,10 @@ declare global {
   var __game: Game;
   var __hud: Hud;
   var __pool: Pool | null;
+  var __stats: typeof siteStats;
 }
 
 globalThis.__game = game;
 globalThis.__hud = hud;
 globalThis.__pool = pool;
+globalThis.__stats = siteStats;

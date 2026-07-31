@@ -635,6 +635,81 @@ export const POOL = {
 };
 
 /**
+ * PostHog, which is two separate things wearing one name.
+ *
+ * The *capture* half runs in the browser on the project API key — the `phc_...` one, which
+ * is public by design: it can write events and read nothing, which is why it is safe to
+ * inline into the bundle and why Vite is allowed to do exactly that.
+ *
+ * The *stats* half runs on the server on a personal API key — the `phx_...` one, which can
+ * read the whole project. It never goes near the client, and the endpoint below is what the
+ * client gets instead: three numbers, already computed, with the key that produced them
+ * still on this side of the wire. Anything that moves that key into `VITE_*` publishes it.
+ */
+export const ANALYTICS = {
+  /**
+   * Two hosts, because PostHog has two and they are not interchangeable.
+   *
+   * INGEST is where the browser posts events — `us.i.posthog.com`, the edge that exists to
+   * swallow event volume. API is where the query endpoint lives — `us.posthog.com`, the
+   * app itself. Pointing the reader at the ingest host is not a slow failure but a 404 on
+   * a URL that looks entirely correct, which is why these are two constants and not one
+   * with an `i.` somebody remembers to add.
+   *
+   * Both have an EU twin — `eu.i.posthog.com` and `eu.posthog.com` — and the region has to
+   * match the key. A key used against the wrong region authenticates and then reports an
+   * empty project, which reads as "no traffic yet" rather than as the misconfiguration it
+   * is. Self-hosted is whatever the instance is on, for both.
+   */
+  DEFAULT_INGEST_HOST: 'https://us.i.posthog.com',
+  DEFAULT_API_HOST: 'https://us.posthog.com',
+
+  /**
+   * How often the server re-asks PostHog for the three numbers.
+   *
+   * The floor is the rate limit: PostHog meters the query endpoint per team per hour, and
+   * this fires three queries a tick, so a minute costs 180/hour against an allowance in the
+   * low thousands. The ceiling is `currentVisitors`, which is the only one of the three that
+   * moves on a human timescale — a minute-old count of who is playing right now is still
+   * true enough to show, and an hour-old one is not.
+   */
+  REFRESH_MS: 60 * 1000,
+
+  /** Give up on a query and keep the last known numbers. Generous: HogQL is not fast. */
+  TIMEOUT_MS: 15000,
+
+  /**
+   * What "current" means, in minutes.
+   *
+   * Five, because that is the window PostHog's own web analytics calls "currently online",
+   * and a number that disagrees with the dashboard it is supposed to mirror is a bug report
+   * waiting to happen. Long enough that a player reading a briefing still counts; short
+   * enough that it empties out when nobody is playing.
+   */
+  LIVE_WINDOW_MINUTES: 5,
+
+  /**
+   * How far back the average session runs, in days.
+   *
+   * Bounded rather than all-time, because an average over the life of the project is a
+   * number that stops being able to move: a thousand old sessions drown whatever the last
+   * week did, and the figure that is supposed to say "how long people play" says "how long
+   * people played, mostly a while ago". Thirty days is a month of behaviour and nothing
+   * older.
+   */
+  SESSION_WINDOW_DAYS: 30,
+
+  /**
+   * How long a client or proxy may reuse the numbers, in seconds.
+   *
+   * Deliberately the refresh interval and not longer: the server cannot answer with anything
+   * newer than its own last refresh, so caching past it would hand out a number this process
+   * has already replaced.
+   */
+  STATS_MAX_AGE_S: 60,
+};
+
+/**
  * Between stages.
  *
  * A stage does not end in a scoreboard, and the next one does not begin with a countdown.

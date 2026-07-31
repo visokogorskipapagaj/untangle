@@ -14,6 +14,19 @@ RUN npm ci
 
 COPY tsconfig.json vite.config.ts index.html ./
 COPY src ./src
+
+# The browser half of PostHog, which has to be here rather than in the runtime environment:
+# Vite inlines VITE_* at build time, so a key supplied to the container at `docker run`
+# arrives long after the only moment it could have been compiled in.
+#
+# Safe as a build arg specifically because this is the *project* key — write-only, public by
+# design, and destined for every player's browser anyway. The personal key that reads the
+# project is a runtime variable on the stage below and must never appear as an ARG: build
+# args are readable in `docker history` on any machine that can pull the image.
+#
+# Unset builds a game with analytics switched off, which is what CI does for a PR.
+ARG VITE_POSTHOG_KEY=""
+ARG VITE_POSTHOG_HOST=""
 RUN npm run build
 
 

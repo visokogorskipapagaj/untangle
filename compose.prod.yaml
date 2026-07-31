@@ -25,6 +25,21 @@ services:
       # bucket — the tunnel's — and one busy client locks the rest out.
       UNTANGLE_TRUST_PROXY: "1"
 
+      # The PostHog stats reader — see server/stats.js. Runtime rather than baked in, which
+      # is the whole reason the personal key is safe to use: it never enters the image, so
+      # it is not in `docker history` and not in the registry.
+      #
+      # Substituted from `~/untangle.env` on the box, which deploy/deploy.sh passes in with
+      # `--env-file`. Deliberately not a `.env` beside this file: this file arrives by
+      # `actions/checkout`, which cleans untracked files, so anything left next to it is
+      # gone by the next deploy.
+      #
+      # Unset, the reader is inert and /api/stats serves nulls. The game is unaffected.
+      POSTHOG_PERSONAL_API_KEY: ${POSTHOG_PERSONAL_API_KEY:-}
+      POSTHOG_PROJECT_ID: ${POSTHOG_PROJECT_ID:-}
+      # The app host, not the ingest host the browser uses. Blank falls back to US cloud.
+      POSTHOG_HOST: ${POSTHOG_HOST:-}
+
     volumes:
       # The one piece of state, and the reason this is a volume rather than a bind mount: a
       # deploy replaces the image wholesale, and the pool has to survive that. Losing it
