@@ -16,6 +16,16 @@ Open work, with enough context to pick up cold. Durable knowledge lives in `READ
   The floor covers those; later stages re-settle on their own as the wider margin admits
   slower clears. Worth a look at `/api/pars` a week after deploying.
 
+## Deploy
+
+- **Deploying is a manual pull on the box.** CI still publishes
+  `ghcr.io/visokogorskipapagaj/untangle:latest` on every green push to main, but the
+  self-hosted `deploy` job is gone: no runner was ever registered, so every run on main
+  sat queued until GitHub cancelled it a day later. Until a runner exists, a deploy is
+  `./deploy/deploy.sh` run from a checkout on the box, which backs up the pool, pulls,
+  health-checks and rolls back on its own. The README's "Push to deploy" section still
+  describes the runner; rewrite it once the deploy path is settled.
+
 ## UI
 
 - **Enter on the game-over panel should retry.** The hotkey only knows the CLEARED card and
