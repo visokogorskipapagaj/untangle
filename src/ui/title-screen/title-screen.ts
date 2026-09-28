@@ -27,7 +27,7 @@ export class UTitleScreen extends UiElement {
     // boast, it is a player who has pressed Start once.
     this.#best.textContent =
       progress.maxStage > 1
-        ? `Best run: stage ${progress.maxStage} · ${formatScore(progress.total)} points`
+        ? `Best run reached stage ${progress.maxStage} with ${formatScore(progress.total)} points`
         : '';
     this.hidden = false;
   }

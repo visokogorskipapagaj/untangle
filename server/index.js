@@ -72,16 +72,28 @@ function json(res, status, body, cacheControl = 'no-store') {
 }
 
 /**
- * The client's address, trusting X-Forwarded-For only when told to.
+ * The client's address, trusting X-Forwarded-For only when told to, and only as far as
+ * told.
  *
  * Behind a proxy the socket address is the proxy's and every player shares one rate limit;
  * in front of one, an attacker sets X-Forwarded-For to whatever they like and has none. It
- * cannot be both, and there is no way to detect which — so it is a deliberate switch, off.
+ * cannot be both, and there is no way to detect which, so it is a deliberate switch, off.
+ *
+ * UNTANGLE_TRUST_PROXY is the number of proxies in front of this server. The header is
+ * read from the right: each proxy appends the address it saw, so the last entry came from
+ * the proxy next to us, the one before it from the proxy in front of that, and anything
+ * further left is whatever the client chose to send. Reading the first entry, as this
+ * used to, handed the rate limit's key to the client.
  */
-function clientIp(req) {
-  if (process.env.UNTANGLE_TRUST_PROXY === '1') {
+export function clientIp(req) {
+  const hops = Number(process.env.UNTANGLE_TRUST_PROXY) || 0;
+  if (hops > 0) {
     const forwarded = req.headers['x-forwarded-for'];
-    if (typeof forwarded === 'string' && forwarded) return forwarded.split(',')[0].trim();
+    if (typeof forwarded === 'string' && forwarded) {
+      const chain = forwarded.split(',').map((part) => part.trim()).filter(Boolean);
+      const ip = chain[chain.length - hops];
+      if (ip) return ip;
+    }
   }
   return req.socket.remoteAddress || 'unknown';
 }
@@ -179,7 +191,13 @@ async function serveStatic(req, res) {
     'cache-control': cacheFor(pathname),
   });
   if (req.method === 'HEAD') return res.end();
-  createReadStream(full).pipe(res);
+  // The file was there a moment ago and may not be now: a build replacing dist/ under a
+  // running server, for one. Unhandled, the stream's error is an uncaught exception that
+  // takes the process and the unflushed pool with it. Headers are already out, so the
+  // honest answer is to cut the connection.
+  const stream = createReadStream(full);
+  stream.on('error', () => res.destroy());
+  stream.pipe(res);
 }
 
 export function createApp(store) {
@@ -200,7 +218,8 @@ export function createApp(store) {
       // Reads and writes share one budget. The read used to be the unmetered one, which
       // had it backwards: it is the expensive endpoint, and the only one an anonymous
       // caller can reach without having anything to say.
-      if (!store.allow(clientIp(req), Date.now())) {
+      const ip = clientIp(req);
+      if (!store.allow(ip, Date.now())) {
         return json(res, 429, { error: 'slow down' });
       }
 
@@ -241,12 +260,28 @@ export function createApp(store) {
         const times = Array.isArray(body?.times) ? body.times : [body];
         if (times.length > POOL.OUTBOX_MAX) return json(res, 400, { error: 'too many' });
 
+        // The request already cost one; a batch costs one per entry on top. Otherwise a
+        // batch of fifty is a single unit of the budget, fifty times the intended rate.
+        if (times.length > 1 && !store.allow(ip, Date.now(), times.length - 1)) {
+          return json(res, 429, { error: 'slow down' });
+        }
+
+        // Every entry for a stage is judged against the pool as it stood before this
+        // request, not against a figure the entries before it have already dragged down.
+        const typical = new Map();
+        for (const entry of times) {
+          const stage = entry?.stage;
+          if (!typical.has(stage)) typical.set(stage, store.typical(stage));
+        }
+
         // A rejected time is not an error the client can do anything about — it retried
         // correctly and the server judged the number — so the response counts rather than
         // fails, and the client clears its outbox either way.
         let stored = 0;
         for (const entry of times) {
-          if (store.submit(entry?.stage, entry?.ms) !== null) stored += 1;
+          if (store.submit(entry?.stage, entry?.ms, typical.get(entry?.stage)) !== null) {
+            stored += 1;
+          }
         }
         return json(res, 200, { stored, received: times.length });
       }

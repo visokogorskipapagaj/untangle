@@ -9,8 +9,14 @@
   display: none;
 }
 
+.small {
+  margin-bottom: 6px;
+  font-size: 26px;
+}
+
 /* The toggles run to the panel's edges and this row does not, so it needs the gap the
    toggle's own bottom rule does not provide. */
 .row {
-  margin-top: 22px;
+  margin-top: 24px;
+  justify-content: flex-end;
 }

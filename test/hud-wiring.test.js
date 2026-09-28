@@ -19,9 +19,13 @@ import { read, root } from './support/dom.js';
 
 const UI = join(root, 'src/ui');
 
-/** Every component folder. A new one is picked up here without being listed anywhere. */
+/**
+ * Every component folder. A new one is picked up here without being listed anywhere. The
+ * two folders that are not components are the shared Sass partials and the typeface.
+ */
+const NOT_COMPONENTS = new Set(['shared', 'fonts']);
 const components = readdirSync(UI, { withFileTypes: true })
-  .filter((entry) => entry.isDirectory() && entry.name !== 'shared')
+  .filter((entry) => entry.isDirectory() && !NOT_COMPONENTS.has(entry.name))
   .map((entry) => entry.name)
   .sort();
 

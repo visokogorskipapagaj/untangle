@@ -9,9 +9,10 @@
   display: none;
 }
 
-/* The stage number, in the colour of the thing that just happened to it. Smaller than a
-   score, because it is a fact rather than a reward. */
-.bigscore--fail {
+/* Which of the two ran out is the headline, in the colour of the thing that just happened.
+   The stage number is context and sits above it, small. */
+.fail {
+  margin-bottom: 16px;
+  font-size: clamp(32px, 8vw, 44px);
   color: var(--warn);
-  font-size: 38px;
 }

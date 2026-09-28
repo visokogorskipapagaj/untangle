@@ -5,21 +5,22 @@
   pointer-events: none;
 }
 
-/* Three tracks so the middle group stays optically centred regardless of how wide the stage
+/* Three tracks so the clock stays optically centred regardless of how wide the stage
    counter or the score readout happen to get. */
 .bar {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
-  padding-top: max(10px, env(safe-area-inset-top));
-  background: linear-gradient(to bottom, rgba(10, 13, 19, 0.85), transparent);
+  padding: 12px 16px 14px;
+  padding-top: max(12px, env(safe-area-inset-top));
+  background: linear-gradient(to bottom, rgba(10, 13, 19, 0.88) 0%, rgba(10, 13, 19, 0.5) 60%, transparent);
 }
 
 .group {
   display: flex;
   align-items: center;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -27,35 +28,55 @@
   justify-self: center;
 }
 
-.group--right {
+.right {
   justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
 }
 
-/* The dividers between readouts. The bank is excluded because it is the one stat with a
-   border radius, and it draws its own divider as a pseudo-element instead — a 1px border on
-   a rounded box follows the corners round and draws a bent stroke rather than a line. */
-u-stat + u-stat:not([variant='bank']) {
-  border-left-color: var(--line);
+.tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.group--right u-stat {
-  text-align: right;
-}
+@media (max-width: 600px) {
+  /* Two rows. The clock and the tools stay up top where they were; the three counters the
+     player checks between moves drop under them, centred. Nothing is hidden: settings used
+     to go on a phone, and a control that exists on one device and not another is a control
+     nobody learns. */
+  .bar {
+    grid-template-rows: auto auto;
+    row-gap: 2px;
+    padding: 8px 10px 10px;
+    padding-top: max(8px, env(safe-area-inset-top));
+  }
 
-/* Icon buttons sit as a pair, closer to each other than to the stats they follow. */
-u-icon-button {
-  margin-left: 12px;
-}
+  .group--left {
+    grid-row: 1;
+    grid-column: 1;
+  }
 
-u-icon-button + u-icon-button {
-  margin-left: 8px;
-}
+  .group--center {
+    grid-row: 1;
+    grid-column: 2;
+  }
 
-@media (max-width: 640px) {
-  /* Six stats and two buttons will not fit. Restart is the one that gets used mid-run and
-     the one there is no other way to reach on a touchscreen, where there is no R key — so
-     settings, which is a thing you set once, is the one that goes. */
-  [data-action='settings'] {
-    display: none;
+  .right {
+    display: contents;
+  }
+
+  .tools {
+    grid-row: 1;
+    grid-column: 3;
+    justify-self: end;
+  }
+
+  .group--right {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    justify-self: center;
   }
 }

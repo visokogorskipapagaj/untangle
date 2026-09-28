@@ -4,16 +4,36 @@
 }
 
 .panel {
-  padding: 30px 32px;
+  position: relative;
+  padding: 34px 36px 32px;
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: var(--radius-l);
   background: var(--panel);
+  box-shadow: var(--shadow-panel);
   text-align: center;
+  animation: panel-in var(--dur) var(--ease);
+}
+
+/* A hairline of light along the top edge, which is what makes the card read as a surface
+   rather than a darker rectangle. */
+.panel::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  border-radius: var(--radius-l) var(--radius-l) 0 0;
+  background: linear-gradient(to right, transparent, rgba(232, 236, 244, 0.28), transparent);
+  pointer-events: none;
+}
+
+/* The title screen: room for the word, and for four lines of lede at a readable measure. */
+:host([variant='title']) {
+  width: min(540px, 100%);
 }
 
 /* Settings: a list of labelled controls, which wants a left edge to run down. */
 :host([variant='narrow']) {
-  width: min(400px, 100%);
+  width: min(420px, 100%);
 }
 
 :host([variant='narrow']) .panel {
@@ -22,12 +42,12 @@
 
 /**
  * Briefings. Wider than the panels that carry a number, because this one carries sentences:
- * 540px at this size gives a measure short enough to read as a poem. Ragged left-aligned
- * prose for the same reason — centred body copy is a headline that got away from someone.
+ * 560px at this size gives a measure of about seventy characters. Ragged left-aligned
+ * prose for the same reason; centred body copy is a headline that got away from someone.
  */
 :host([variant='brief']) {
-  width: min(540px, 100%);
-  /* The one panel that can outgrow a short window — the cursed card runs to four paragraphs
+  width: min(560px, 100%);
+  /* The one panel that can outgrow a short window: the cursed card runs to four paragraphs
      and a landscape phone is about 380px tall. It scrolls rather than being clipped, which
      would take the button with it and leave no way out of the panel at all. */
   max-height: 100%;
@@ -41,19 +61,32 @@
 }
 
 /* Clipped, which is what holds the interlude's countdown wash to the panel's own rounded
-   corners rather than letting it square them off. Positioned, so the wash — which is
-   absolutely positioned and slotted in from outside — resolves against this box. */
+   corners rather than letting it square them off. Positioned, so the wash, which is
+   absolutely positioned and slotted in from outside, resolves against this box. */
 :host([variant='interlude']) .panel {
-  position: relative;
-  padding: 26px 32px 30px;
+  padding: 30px 36px 32px;
   overflow: hidden;
 }
 
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+}
+
 @media (max-width: 420px) {
-  /* Pause and Play stage come to about four pixels more than the panel has room for here,
-     and the row wraps rather than squeezing — which turns a control and its primary action
-     into a stacked list of two equal choices. The padding is what gives way. */
+  .panel {
+    padding: 26px 22px 24px;
+  }
+
   :host([variant='interlude']) .panel {
-    padding: 22px 18px 26px;
+    padding: 24px 18px 26px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel {
+    animation: none;
   }
 }

@@ -13,6 +13,9 @@ import { clamp } from './geometry.js';
  */
 const { ORIGIN_Y, TOTAL_DY, NAME_DY, BANNER_Y } = COMBO_HUD;
 
+/** The face every number in the interface is set in; the canvas readouts match the HUD. */
+const DISPLAY = '"Bricolage Grotesque", ui-rounded, ui-sans-serif, system-ui, sans-serif';
+
 /** Height of the hop the cursed readout takes each time the multiplier climbs. */
 const CURSED_HOP_PX = 11;
 
@@ -318,7 +321,7 @@ export class Renderer {
 
     // The label: how many knots this run has taken, and what the curse is multiplying it
     // by if it is on.
-    ctx.font = '800 15px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.font = `800 15px ${DISPLAY}`;
     if (cursed) {
       ctx.fillStyle = '#ff4d3d';
       ctx.shadowColor = 'rgba(255, 77, 61, 0.75)';
@@ -337,7 +340,7 @@ export class Renderer {
     // The total, and the thing knot scores fly up into. This is the number at stake, so it
     // is the biggest element in the indicator — and the one element the jump never touches,
     // because a flying knot score is aimed at where it is right now.
-    ctx.font = '800 34px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.font = `800 36px ${DISPLAY}`;
     ctx.fillStyle = cursed ? '#ff6a4d' : hot ? '#ffd166' : '#e8ecf4';
     ctx.shadowBlur = cursed ? 22 : hot ? 16 : 0;
     ctx.fillText(Math.round(state.comboValue || 0).toLocaleString(), 0, TOTAL_DY);
@@ -347,7 +350,7 @@ export class Renderer {
     // itself, and the total has to stay exactly where it is, since that is the point knot
     // scores fly into. It jumps with the label, because it is the same fact said twice.
     if (cursed && state.comboName) {
-      ctx.font = '700 13px ui-sans-serif, system-ui, sans-serif';
+      ctx.font = `700 13px ${DISPLAY}`;
       ctx.fillStyle = '#ffb4a6';
       ctx.shadowBlur = 12;
       this.#struck(state.cursedPop, NAME_DY, () => ctx.fillText(state.comboName, 0, NAME_DY));
@@ -414,7 +417,7 @@ export class Renderer {
     const { ctx } = this;
     ctx.save();
     ctx.textAlign = 'center';
-    ctx.font = '600 17px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.font = `700 17px ${DISPLAY}`;
 
     for (const flash of flashes) {
       const t = 1 - flash.life / flash.total;
@@ -494,7 +497,7 @@ export class Renderer {
       subhead = bleed;
     }
 
-    ctx.font = '800 20px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.font = `800 20px ${DISPLAY}`;
     ctx.fillStyle = headline;
     ctx.shadowColor = banner.killed
       ? 'rgba(217, 41, 28, 0.5)'
@@ -511,14 +514,14 @@ export class Renderer {
     ctx.fillText(banner.multiplier, 0, banner.text ? -24 : -14);
 
     if (banner.text) {
-      ctx.font = '700 14px ui-sans-serif, system-ui, sans-serif';
+      ctx.font = `700 14px ${DISPLAY}`;
       ctx.fillStyle = subhead;
       ctx.shadowBlur = 12;
       ctx.fillText(banner.text, 0, -2);
     }
 
     if (banner.payout) {
-      ctx.font = '800 30px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx.font = `800 32px ${DISPLAY}`;
       ctx.fillStyle = banner.killed ? '#d9291c' : '#5ee6a8';
       ctx.shadowColor = banner.killed ? 'rgba(217,41,28,0.5)' : 'rgba(94,230,168,0.45)';
       ctx.shadowBlur = 18;

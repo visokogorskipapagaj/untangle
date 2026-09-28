@@ -82,23 +82,3 @@ jobs:
           # entirely on any build where dependencies did not move.
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-  # Runs on the box itself. The runner dials out to GitHub, so the tunnel stays
-  # outbound-only — there is no inbound route into the LAN and no SSH key or Access token
-  # sitting in this repository's secrets.
-  deploy:
-    needs: publish
-    if: github.ref == 'refs/heads/main'
-    runs-on: self-hosted
-
-    # Two deploys at once would race on the same containers and the same volume.
-    concurrency:
-      group: deploy
-      cancel-in-progress: false
-
-    steps:
-      # The compose file and the deploy script come from the checkout, so the box never
-      # holds a copy of either that can drift from what is in the repository.
-      - uses: actions/checkout@v7
-
-      - run: ./deploy/deploy.sh

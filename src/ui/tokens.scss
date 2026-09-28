@@ -5,22 +5,62 @@
  * be sealed off from every other one and still be the same game. A component reaching for
  * `var(--accent)` gets it without anyone handing it over; a component reaching for another
  * component's `.btn` gets nothing, which is the arrangement this file exists to allow.
+ *
+ * The typeface is here too, because @font-face has to be declared in the document to be
+ * usable from inside a shadow root. Bricolage Grotesque carries every number and every
+ * headline in the game; prose stays on the system stack. Self-hosted so the game keeps
+ * working offline and never phones a font CDN. Licence: fonts/OFL.txt.
  */
+@font-face {
+  font-family: 'Bricolage Grotesque';
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url('./fonts/bricolage-grotesque-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+
 :root {
   --bg: #0a0d13;
   --ink: #e8ecf4;
+  /* Secondary text: prose on a panel, the run total under a score. */
+  --ink-2: rgba(232, 236, 244, 0.72);
   --muted: #7d879c;
   --line: rgba(232, 236, 244, 0.12);
-  --panel: rgba(14, 18, 26, 0.92);
+  --line-strong: rgba(232, 236, 244, 0.24);
+  --panel: rgba(15, 19, 28, 0.9);
+  /* A quiet raised surface: chips in the HUD, ghost buttons, the switch track. */
+  --chip: rgba(232, 236, 244, 0.06);
+  --chip-hover: rgba(232, 236, 244, 0.12);
   --accent: #5ee6a8;
+  --accent-hover: #78f0ba;
+  /* Text on the green. */
+  --accent-ink: #05130d;
   --warn: #ff7a6b;
   /* The one warning that is not yet a problem: low on moves, low on time, held. */
   --amber: #ffd166;
   /* A plain wash over whatever is behind it. The interlude's countdown is drawn in it. */
   --white-10: rgba(255, 255, 255, 0.1);
-  /* The bank, which is neither a warning nor a win — the only stat with a colour of its
+  /* The bank, which is neither a warning nor a win: the only stat with a colour of its
      own, so it is a token rather than a hex code repeated across two components. */
   --bank: #8ab4ff;
+
   --font: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --display: 'Bricolage Grotesque', ui-rounded, ui-sans-serif, system-ui, sans-serif;
   --mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+
+  --radius-s: 10px;
+  --radius-m: 16px;
+  --radius-l: 24px;
+  --radius-pill: 999px;
+
+  /* Keyboard focus, drawn as a ring so it works on pills and circles alike. */
+  --focus: 0 0 0 3px rgba(94, 230, 168, 0.45);
+  --shadow-panel: 0 40px 80px -30px rgba(0, 0, 0, 0.8);
+
+  --dur-fast: 120ms;
+  --dur: 220ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 }

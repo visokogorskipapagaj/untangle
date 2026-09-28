@@ -2,13 +2,13 @@ import { ComboRun } from './combo.js';
 import { BRIEFING, CLOCK, COMBO, COMBO_TOTAL_Y, CURSED, INTERLUDE, ROPE } from './config.js';
 import {
   expectedTime,
-  poolFraction,
   recordClear,
   runsCounted,
   slackFor,
-  slowestStruck,
   StageClock,
   stageDeadline,
+  targetFor,
+  thinFor,
 } from './deadline.js';
 import { generateStage, keepInside, playMargin } from './generator.js';
 import { clamp, nearestOnPolyline } from './geometry.js';
@@ -98,6 +98,13 @@ export class Game {
     this.width = 0;
     this.height = 0;
     this.margin = 0;
+    /**
+     * The viewport the current board was generated in, and how far the board has been
+     * scaled from it. Every resize fits the frame afresh rather than scaling the previous
+     * viewport, so a phone rotated and rotated back lands exactly where it started.
+     */
+    this.frame = null;
+    this.fit = 1;
 
     this.ropes = [];
     this.tracker = null;
@@ -179,6 +186,8 @@ export class Game {
     this.stageInfo = info;
     this.ropes = info.ropes;
     this.margin = info.margin;
+    this.frame = { width: this.width, height: this.height };
+    this.fit = 1;
 
     const palette = stagePalette(
       stage,
@@ -328,7 +337,14 @@ export class Game {
    */
   resize(width, height) {
     if (this.ropes.length && this.width > 0 && this.height > 0) {
-      const scale = Math.min(width / this.width, height / this.height);
+      // Fit the frame the board was generated in, and apply only the change from the fit
+      // already applied. Scaling by the ratio of consecutive viewports instead loses a
+      // little on every change and never gets it back: a phone rotated to landscape and
+      // back sat at a fifth of its size, and every URL-bar collapse cost a few percent.
+      if (!this.frame) this.frame = { width: this.width, height: this.height };
+      const fit = Math.min(width / this.frame.width, height / this.frame.height);
+      const scale = fit / this.fit;
+      this.fit = fit;
       const offsetX = width / 2 - (this.width / 2) * scale;
       const offsetY = height / 2 - (this.height / 2) * scale;
       for (const rope of this.ropes) rope.transform(scale, offsetX, offsetY);
@@ -1011,8 +1027,8 @@ export class Game {
 
     // Filed before anything else can touch the clock. The local record is still kept for
     // every clear: it is what the deadline falls back to with no network, and it is what
-    // CLOCK.OWN_FLOOR reads to keep a pooled deadline from going tighter than a time this
-    // player has actually hit.
+    // CLOCK.OWN_FLOOR reads to keep a pooled deadline from going tighter than this player's
+    // own record says they need.
     const filed = recordClear(this.progress.times, this.stage, this.clock.elapsed);
     // Contributed to everyone else's par, and deliberately not awaited — this runs inside
     // scoring a solved stage, and the time affects the next player rather than this run.
@@ -1130,15 +1146,15 @@ export class Game {
         (this.clock.timed ? `${(this.clock.limit / 1000).toFixed(1)}s` : 'untimed') +
         `  runs ${(this.progress.times[String(this.stage)] || []).length}` +
         ` -> counted ${runsCounted(this.stage, this.progress.times).length}` +
-        ` (struck ${slowestStruck(this.stage)})` +
-        `  avg ${((expectedTime(this.stage, this.progress.times) || 0) / 1000).toFixed(1)}s` +
+        ` (thin x${thinFor(runsCounted(this.stage, this.progress.times).length).toFixed(2)})` +
+        `  own ${((expectedTime(this.stage, this.progress.times) || 0) / 1000).toFixed(1)}s` +
+        `  target q${targetFor(this.stage).toFixed(2)}` +
         `  slack ${slackFor(this.stage).toFixed(2)}`,
       // Which population answered, now that two can. A deadline that feels wrong is the
       // first thing anyone will want to attribute, and "pooled or mine" is the first cut.
       `pool ${this.#pars()[String(this.stage)] ? `par ${(this.#pars()[String(this.stage)] / 1000).toFixed(1)}s` : 'no par'}` +
         ` (${Object.keys(this.#pars()).length} stages` +
-        `${this.pool?.outbox.length ? `, ${this.pool.outbox.length} unsent` : ''})` +
-        `  fraction ${poolFraction(this.stage).toFixed(2)}`,
+        `${this.pool?.outbox.length ? `, ${this.pool.outbox.length} unsent` : ''})`,
       `state ${this.state}${this.grab ? '  grabbing' : ''}${this.settle ? '  settling' : ''}`,
     ].filter(Boolean);
   }

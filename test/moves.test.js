@@ -164,3 +164,34 @@ test('game over clears the bank, a fresh run restores the cushion', () => {
   budget.resetRun();
   assert.equal(budget.bank, MOVES.STARTING_BANK);
 });
+
+test('the cap is on what the bank can still pay, not on the gross figure', () => {
+  // Six banked, three granted, five spent: two of the six are already spoken for, so a
+  // move earned now has room. Capping the gross figure threw it away and lit the box up
+  // as full while it read four.
+  const budget = new MoveBudget();
+  budget.bank = MOVES.BANK_MAX;
+  budget.beginStage(3, 0);
+  for (let i = 0; i < 5; i++) budget.spend();
+
+  assert.equal(budget.overdraft, 2);
+  assert.equal(budget.bankLeft, MOVES.BANK_MAX - 2);
+  assert.equal(budget.bankFull, false, 'there is room');
+
+  budget.grant(1);
+  assert.equal(budget.bankLeft, MOVES.BANK_MAX - 1, 'and the earned move lands in it');
+
+  // Settling deducts the overdraft and leaves the gross figure under the cap.
+  budget.settleStage();
+  assert.equal(budget.bank, MOVES.BANK_MAX - 1);
+
+  // Abandoning a stage mid-overdraft forgives the overdraft, and the bank comes back under
+  // the plain cap rather than sitting above it.
+  budget.bank = MOVES.BANK_MAX;
+  budget.beginStage(3, 0);
+  for (let i = 0; i < 5; i++) budget.spend();
+  budget.grant(2);
+  budget.beginStage(3, 0);
+  assert.equal(budget.bank, MOVES.BANK_MAX);
+  assert.equal(budget.bankFull, true);
+});

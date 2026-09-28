@@ -5,10 +5,15 @@
   display: grid;
   place-items: center;
   padding: 20px;
-  background: rgba(10, 13, 19, 0.72);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  padding-top: max(20px, env(safe-area-inset-top));
+  padding-bottom: max(20px, env(safe-area-inset-bottom));
+  background: rgba(10, 13, 19, 0.66);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   z-index: 10;
+  /* One fade when a panel comes up. `display: none` to `grid` restarts it, so every
+     opening is the same beat and nothing else on the page animates in. */
+  animation: overlay-in var(--dur) ease-out;
 }
 
 :host([hidden]) {
@@ -18,7 +23,19 @@
 /* Lighter than the rest and blurred less: the card between stages is a beat rather than a
    stop, and the board waiting behind it is the thing worth looking at. */
 :host([variant='interlude']) {
-  background: rgba(10, 13, 19, 0.55);
-  backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
+  background: rgba(10, 13, 19, 0.5);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :host {
+    animation: none;
+  }
 }

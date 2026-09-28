@@ -3,7 +3,7 @@
   wait: what the stage paid, what the run is worth, and the two ways to argue with the three
   seconds it holds for.
 
-  Those three seconds are the bar — a tint draining from the top of the panel to the bottom.
+  Those three seconds are the bar: a tint draining from the top of the panel to the bottom.
   It is first in the panel and absolutely positioned, so it paints behind the text rather
   than over it.
 -->
@@ -12,13 +12,13 @@
     <div class="timer" aria-hidden="true"><i data-el="timer"></i></div>
     <div class="body">
       <p class="eyebrow">Stage <span data-el="stage">1</span></p>
-      <p class="headline">CLEARED!</p>
+      <p class="headline">Cleared</p>
       <p class="points" data-el="score">0</p>
-      <p class="total">Running you a total of <span data-el="total">0</span></p>
+      <p class="total">Run total <span data-el="total">0</span></p>
       <div class="row actions">
         <!--
           Both icons live in the button and the stylesheet shows one, keyed off `paused` on
-          this component — which setPaused already toggles, so pausing needs no second piece
+          this component, which setPaused already toggles, so pausing needs no second piece
           of state. The label is a span of its own because the button's own textContent is
           those icons: writing to it would delete them.
         -->

@@ -3,7 +3,7 @@
 
 /* No box of its own: the overlay inside is what fills the playfield, and a wrapper round it
    would only be a second thing to position. Hiding the region still has to be said out
-   loud, though — `display: contents` here outranks the browser's own `[hidden]` rule. */
+   loud, though: `display: contents` here outranks the browser's own `[hidden]` rule. */
 :host {
   display: contents;
 }
@@ -12,12 +12,22 @@
   display: none;
 }
 
+/* The one place the game gets to be loud. The word is the whole hero: no image, no
+   tagline, one weight of one face at the largest size the panel will take. */
 .title {
-  margin: 0 0 14px;
-  font-size: clamp(34px, 8vw, 52px);
-  font-weight: 700;
-  letter-spacing: 0.22em;
-  /* Letter-spacing pads the right of the last glyph, which shifts a centred word left by
-     half a space. The matching indent puts it back. */
-  text-indent: 0.22em;
+  margin: 0 0 18px;
+  font-size: clamp(56px, 15vw, 92px);
+  letter-spacing: -0.045em;
+  line-height: 0.95;
+}
+
+.lede {
+  max-width: 44ch;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.best {
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
 }

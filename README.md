@@ -47,6 +47,8 @@ src/
   ui/
     tokens.scss     the design system, and the only global styling
     base.ts         shadow root, adopted sheet, template
+    shared/         Sass partials more than one component uses
+    fonts/          the typeface, self-hosted, with its licence
     <component>/    <component>.html + .scss + .ts
 server/
   index.js          the pool API, /api/stats, and the static server for dist/
@@ -65,6 +67,13 @@ component's CSS can land on another's markup. What still crosses the boundary is
 system: custom properties inherit through shadow roots, so `tokens.scss` reaches everything
 without being handed to anything. That is the whole arrangement — tokens are shared, rules
 are not.
+
+The typeface is the one asset. Bricolage Grotesque, a variable font, is self-hosted from
+`src/ui/fonts` and declared in `tokens.scss`, because `@font-face` has to live in the
+document to be usable from inside a shadow root. It sets every number and every headline,
+on the canvas as well as in the HUD; prose stays on the system stack. It ships with the
+game rather than being fetched from a font CDN, so an offline load looks the same as an
+online one.
 
 `hud.ts` is the seam. It finds the regions, forwards their events to handlers, owns the
 page-wide hotkeys, and answers `anyOverlayOpen`; `game.js` calls `showCleared` and `setStats`
@@ -130,8 +139,8 @@ server {
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host              $host;
         proxy_set_header X-Real-IP         $remote_addr;
-        # UNTANGLE_TRUST_PROXY=1 reads the first entry of this. Without it every player
-        # shares one rate-limit bucket, because every request arrives from the proxy.
+        # UNTANGLE_TRUST_PROXY=1 reads the entry this proxy appends. Without it every
+        # player shares one rate-limit bucket, because every request arrives from the proxy.
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
@@ -176,7 +185,8 @@ Covers the geometry primitives everything else is built on (segment intersection
 segment-to-segment distance, crossing detection and its de-duplication rules), the
 minimum-vertex-cover solver that sets each stage's move budget, the move/bank economy,
 the knot tracker's farm-proof ratchet, and the stage clock — both the model in isolation
-(trimming, the margin curve, the strike-the-slowest walk past par, outlier rejection) and
+(trimming, the margin curve, the target walking down past par, the thin-record widening,
+the floor, outlier rejection) and
 the rules about *when* it is read, which are driven through a real `Game`.
 
 The UI has two files of its own. `hud-render.test.js` mounts index.html in a real DOM
@@ -213,7 +223,9 @@ off onto a CDN, and the CORS headers are already there for it.
 
 The batch form exists because the client holds times it couldn't send and drains them
 together. A submission is bounded (`POOL.MIN_MS`/`MAX_MS`) and clamped toward its stage's
-typical time. Reads and writes share one per-IP rate limit — the read is the expensive
+typical time, and a whole batch is clamped against the pool as it stood before the batch,
+so fifty entries cannot walk the clamp down with them. Reads and writes share one per-IP
+rate limit, charged per entry rather than per request — the read is the expensive
 endpoint, since it sorts every sample of every stage, so leaving it unmetered had it
 backwards. None of that is real anti-cheat — nothing client-submitted can be — it is there
 so one bad or forged number cannot poison a stage for everyone else.
@@ -222,7 +234,7 @@ so one bad or forged number cannot poison a stage for everyone else.
 | --- | --- |
 | `PORT` | Listen port (default 8000). |
 | `UNTANGLE_DATA` | Pool file (default `server/data/pool.json`). |
-| `UNTANGLE_TRUST_PROXY=1` | Read the client IP from `X-Forwarded-For`. Only behind a proxy that sets it — in front of one, it lets anyone forge their way around the rate limit. |
+| `UNTANGLE_TRUST_PROXY=N` | Read the client IP from `X-Forwarded-For`, counting `N` trusted proxies from the right: `1` behind nginx alone, `2` behind Cloudflare and then nginx. Each proxy appends the address it saw, so the entries further left are whatever the client sent. Only set it behind a proxy that appends; in front of one, it lets anyone forge their way around the rate limit. |
 
 ## Analytics
 
@@ -351,50 +363,61 @@ and there is a reason to spend down.
 
 **The stage clock has no starting time**, because it isn't given one. The game has no
 opinion about how long a board should take; it only has a record of how long it takes
-people (`src/deadline.js`). The **shared pool** answers first — every clear anyone submits
-is filed against its stage, and the server sends back one par per stage — and the times on
-your own device answer when it can't, which covers a first load offline, a dead server, and
-a stage further out than anyone has reached. A stage *nobody* has ever cleared still runs
-**untimed**, the clock only measuring it.
+people (`src/deadline.js`). The **shared pool** answers first, and the times on your own
+device answer when it can't, which covers a first load offline, a dead server, and a stage
+further out than anyone has reached. When both answer, the looser of the two wins. A stage
+*nobody* has ever cleared still runs **untimed**, the clock only measuring it.
 
-The model is three steps and nothing else. **Trim** the extremes off the stage's recorded
-times — top and bottom 10%, so the run interrupted by the doorbell and the freak lucky
-board both drop out. **Average** what survives. **Add a margin** for the stage:
+One fact shapes the whole model. Only clears are filed, and a clear is by definition faster
+than the deadline it was played against. So the record is not "how long the stage takes";
+it is "how long it took the people who made it", which is the fast end. Average that and
+hand the average back as the next deadline and the number can only fall: every new sample
+lands under the number that produced it. The first version of this model did exactly that,
+with a margin that reached zero at stage 30, and simulated against a population of players
+it left a median player clearing stage 10 one attempt in ten and nothing past par. That is
+the "too hard" people reported, and it was structural rather than a matter of tuning.
+
+The quote is now built to hold still under that bias, in five steps:
+
+1. **Trim** the extremes off the stage's recorded times, top and bottom 10%, so the run
+   interrupted by the doorbell and the freak lucky board both drop out.
+2. **Target** the *slow* end of what survives: the 75th percentile, not the mean. The slow
+   end of the clears is the closest thing on record to what the stage takes.
+3. **Widen** a thin record. Below ten runs the trim cannot reject anything, so the quote is
+   multiplied by up to 1.5 (one run) tapering to nothing at ten. One expert's debut clear is
+   not a par for everyone after them.
+4. **Add the margin** for the stage: +40% at stage 1, easing to +30% at stage 30 and
+   holding there. It never reaches zero, because a margin of zero is the ratchet above.
+5. **Floor** it at eight seconds. Under that a deadline is a reflex test, not a clock. It
+   binds on the tutorial stages, where the record says two seconds and a first-timer needs
+   ten to read the board; late pars are several times it.
 
 | stage | 1 | 5 | 10 | 15 | 20 | 25 | **30+** |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| margin | +40% | +34% | +28% | +21% | +14% | +7% | **+0%** |
+| margin | +40% | +39% | +37% | +35% | +33% | +32% | **+30%** |
 
-So a stage you average 10 seconds on gives you 14 seconds at stage 1, 12.1 at stage 15,
-and exactly 10 at stage 30. For most of that stretch the clock is a thing in the corner you
-never have to think about.
+**Past stage 30 the margin holds and the target does the tightening.** The percentile the
+stage is quoted at eases from the 75th down to the 60th over the next twenty stages and
+stops there, so the ask slides from "a slow clear" to "a fairly typical one" and never on
+to the fastest run, which on a pooled record is somebody else's best day. With twelve runs
+on record from 42s to 75s:
 
-**Past stage 30 the margin does not go negative — the average does the tightening.** Each
-stage past par strikes the slowest surviving run off before averaging, so the target slides
-from "a run like your usual ones" to "a run like your better ones" and finally to your best
-one, where it stops. With twelve runs on record from 42s to 75s:
-
-| stage | 30 | 33 | 35 | 37 | 39+ |
+| stage | 30 | 35 | 40 | 45 | 50+ |
 | --- | --- | --- | --- | --- | --- |
-| runs counted | 10 | 7 | 5 | 3 | 1 |
-| deadline | 0:59 | 0:54 | 0:51 | 0:48 | **0:45** |
+| percentile | 75th | 71st | 68th | 64th | **60th** |
+| deadline | 1:25 | 1:24 | 1:23 | 1:21 | **1:20** |
 
-Against the pool that same curve is expressed as a **fraction** rather than a count. One
-run struck per stage means something on a twenty-run personal window; struck off four
-hundred pooled runs it is a rounding error, and the entire late game would quietly stop
-biting. So the pooled path takes the fastest `poolFraction(stage)` of what survives the
-trim — the same proportion the count represents on a full personal window — and gets an
-identical curve at any sample size. Change one and you must change the other.
+The pool and the device run the identical quote, so the two populations are asked the same
+question. **When both have a record, the looser answer is the deadline** (`CLOCK.OWN_FLOOR`).
+A pooled quote can describe a stage this particular player cannot clear, and their own
+record is the standard they have demonstrably met, so they are never held past it. It cuts
+the other way too: a player faster than the pool is quoted the pool's time, not their own.
+It does nothing on a stage the player has never cleared, which is the real price of pooling;
+the thin-record widening and the floor are what protect a new player there.
 
-**The clock used to need no floor, and the pool is what cost it that.** When every deadline
-was the mean of runs *you* completed, the tightest one reachable was a time you had already
-proved you could hit: a model built only from your own measurements cannot describe a stage
-you personally cannot clear. A pooled mean can, and for anyone below the playerbase's middle
-it routinely will. So the invariant is back as an explicit guard rather than a property of
-the data — `CLOCK.OWN_FLOOR` keeps a pooled deadline from ever going tighter than your own
-fastest clear of that stage. It can only loosen a deadline, and it does nothing at all on a
-stage you have never cleared, which is exactly the case it cannot rescue and the real price
-of pooling.
+Simulated against a lognormal population (skill spread 0.4, per-attempt noise 0.3), a
+median-skill player now clears about 89% of attempts at stage 1, 87% at stage 10, 78% at
+stage 20, 71% at par and 39% at stage 50, against 51%, 17%, 3%, 0% and 0% before.
 
 Only clears are recorded, locally and in the pool; a stage lost to the clock teaches
 neither anything, which is the point — filing it would teach the model that the stage takes

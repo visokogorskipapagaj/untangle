@@ -141,3 +141,18 @@ test('recountAll refreshes every pair without ratcheting', () => {
   assert.equal(tracker.count, 0);
   assert.equal(tracker.commit().length, 1, 'the award was preserved for commit, not eaten');
 });
+
+test('a knot freed by a rope leaving the board has no gap to measure', () => {
+  // A detonated rope keeps its nodes where they were, so measuring against them reads as
+  // a gap of zero: the perfect-squeeze bonus paid on every knot the detonation freed.
+  // Freed is not squeezed, and a null gap is what scoring treats as neutral.
+  const ropes = [horizontal(0, 0, 50), vertical(1, 40, 0)];
+  const tracker = new TangleTracker(ropes);
+
+  ropes[1].removed = true;
+  tracker.recount(1);
+  const [event] = tracker.commit();
+
+  assert.equal(event.resolved, 1);
+  assert.equal(event.gap, null);
+});

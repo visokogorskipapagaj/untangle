@@ -20,13 +20,20 @@ export class MoveBudget {
     this.beginStage(1, 0);
   }
 
-  /** Never negative, never above the cap, however and by whom it is written. */
+  /**
+   * Never negative, never above the cap, however and by whom it is written.
+   *
+   * The cap is on what the bank can still pay out, not on the gross figure: an overdraft
+   * in progress is already spoken for, so a bank of six with two overdrawn has room for
+   * two more. Capping the gross number threw a detonation's reward away and lit the box
+   * up as full while it read four.
+   */
   get bank() {
     return this.#bank;
   }
 
   set bank(value) {
-    this.#bank = Math.max(0, Math.min(MOVES.BANK_MAX, value));
+    this.#bank = Math.max(0, Math.min(MOVES.BANK_MAX + this.overdraft, value));
   }
 
   beginStage(ideal, bonus) {
@@ -34,6 +41,9 @@ export class MoveBudget {
     this.bonus = bonus;
     this.budget = ideal + bonus;
     this.used = 0;
+    // A stage abandoned mid-overdraft forgives the overdraft, so anything that was
+    // banked against it comes back under the plain cap.
+    this.bank = this.#bank;
   }
 
   /** A fresh run starts with a small cushion so stage 1 is not a knife-edge. */
@@ -65,7 +75,7 @@ export class MoveBudget {
 
   /** True while spare moves are being thrown away, which the HUD says out loud. */
   get bankFull() {
-    return this.bank >= MOVES.BANK_MAX;
+    return this.bankLeft >= MOVES.BANK_MAX;
   }
 
   /** Moves left in this stage's own grant, before the bank is touched. */

@@ -1,4 +1,7 @@
 <label class="toggle" part="toggle">
-  <input type="checkbox" part="input">
   <span class="text"><slot></slot><slot name="hint"></slot></span>
+  <span class="switch">
+    <input type="checkbox" part="input">
+    <i class="track"><b class="knob"></b></i>
+  </span>
 </label>

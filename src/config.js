@@ -405,14 +405,17 @@ export const COMBO = {
  * no longer at, and nothing would have failed.
  */
 export const COMBO_HUD = {
-  /** The indicator's origin, which is also the label line. */
-  ORIGIN_Y: 100,
+  /**
+   * The indicator's origin, which is also the label line. Under the chain cord, which is
+   * itself under the HUD; on a phone the HUD is two rows and this is what clears them.
+   */
+  ORIGIN_Y: 118,
   /** The running total, offset down from the origin. */
   TOTAL_DY: 28,
   /** The ladder name, under the total and on cursed runs only. */
   NAME_DY: 58,
   /** The payout banner that replaces the indicator when a run ends. */
-  BANNER_Y: 118,
+  BANNER_Y: 136,
 };
 
 /** Absolute y of the running total: the one point knot scores fly into. Never hand-written. */
@@ -459,25 +462,56 @@ export const CLOCK = {
   OUTLIER: 4,
 
   /**
-   * The pressure curve, in two halves that meet at exactly 1.0 — and the halves work by
-   * different means, which is the point.
+   * The pressure curve.
    *
-   * Up to PAR_STAGE the deadline is the player's average plus a margin: SLACK_START at
-   * stage 1, tapering to nothing. For most of that stretch the clock is a thing in the
-   * corner they never have to think about.
+   * Up to PAR_STAGE the deadline is the quoted time plus a margin: SLACK_START at stage 1,
+   * tapering to SLACK_END at par and holding there. For most of that stretch the clock is a
+   * thing in the corner the player never has to think about.
    *
-   * At PAR_STAGE the margin is gone and the deadline is the average itself. Past it the
-   * margin cannot go negative — instead the *average* tightens, by striking the slowest
-   * surviving run off it once per stage (see slowestStruck). The endgame therefore walks
-   * from "your typical run" to "your best run" and stops there.
-   *
-   * That is why there is no floor in here. Every deadline the game ever sets is the mean
-   * of times this player actually recorded on this stage, so the tightest one it can reach
-   * is a single run they have already proved they can do. There is nothing to estimate and
-   * nothing to guard against: the data cannot describe a stage nobody can clear.
+   * SLACK_END is above 1.0, and that is a correctness matter rather than a difficulty one.
+   * The record is clears only, and a clear is always under the deadline that produced it,
+   * so a margin that reaches 1.0 turns the model into a ratchet: every filed run lowers the
+   * quote, the lower quote admits only faster runs, and it walks to the fastest clear on
+   * record. Simulated against a population of players the old 1.0 left a median player
+   * clearing stage 10 one attempt in ten. See deadline.js.
    */
   SLACK_START: 1.4,
+  SLACK_END: 1.3,
   PAR_STAGE: 30,
+
+  /**
+   * Where in the record a stage is quoted, as a quantile of the trimmed clears.
+   *
+   * TARGET up to par: the slow end of the clears, which is the closest thing on record to
+   * how long the stage takes given that the slow *attempts* never got filed. Past par it
+   * eases to TARGET_END over TIGHTEN_STAGES and holds: the late game is the quote sliding
+   * from "a slow clear" to "a typical clear", not to the fastest one, which on a pooled
+   * record is somebody else's best day.
+   */
+  TARGET: 0.75,
+  TARGET_END: 0.6,
+  TIGHTEN_STAGES: 20,
+
+  /**
+   * A thin record is quoted wide. With fewer than CONFIDENT_N runs the quote is multiplied
+   * by up to 1 + THIN_MARGIN (at zero runs), tapering to exactly 1 at CONFIDENT_N.
+   *
+   * CONFIDENT_N is 1/TRIM: the point at which the trim can start rejecting anything, and
+   * below which the record is a couple of people's runs taken at face value. The first
+   * expert through a stage should not set its par for everyone who follows.
+   */
+  CONFIDENT_N: 10,
+  THIN_MARGIN: 0.5,
+
+  /**
+   * No deadline is ever shorter than this, whatever the record says.
+   *
+   * The only hand-picked duration in the model, and a floor rather than a target: it binds
+   * on the tutorial stages, where a three-rope board clears in two seconds once you know
+   * the game and takes a first-timer ten to read. Late pars are several times this and
+   * never touch it.
+   */
+  FLOOR_MS: 8000,
 
   /** Readout thresholds: amber, then red and counting in tenths. */
   WARN_MS: 10000,
@@ -547,17 +581,16 @@ export const CLOCK = {
   UNTIMED_FIRST_CLEAR: false,
 
   /**
-   * Never set a pooled deadline tighter than the player's own fastest clear of the stage.
+   * When the pool and this device both have a record of a stage, take the looser of the two
+   * quotes.
    *
-   * The model used to need no floor: every deadline was the mean of runs this player had
-   * really completed, so the tightest one reachable was a time they had already proved. A
-   * pooled mean can describe a stage this particular player cannot clear, and that is not
-   * a hypothetical — it is what "calibrated to the playerbase" means for anybody below its
-   * middle. This puts the old invariant back as an explicit guard rather than a property
-   * of the data, and it can only ever loosen a deadline.
+   * A pooled quote can describe a stage this particular player cannot clear; that is what
+   * "calibrated to the playerbase" means for anybody below its middle. Their own record is
+   * the standard they have demonstrably met, so they are never held past it. It cuts the
+   * other way too: a player faster than the pool is quoted the pool's time, not their own.
    *
-   * It does nothing on a stage the player has never cleared, which is exactly the case it
-   * cannot help with. Set false for an unguarded pool.
+   * It does nothing on a stage the player has never cleared, which is the case it cannot
+   * help with. Set false to let the pool decide alone whenever it has an answer.
    */
   OWN_FLOOR: true,
 };

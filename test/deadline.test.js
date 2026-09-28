@@ -5,15 +5,16 @@ import { CLOCK } from '../src/config.js';
 import {
   expectedTime,
   formatClock,
-  poolFraction,
-  pooledRuns,
   pooledTime,
+  quantile,
+  quotedTime,
   recordClear,
   runsCounted,
   slackFor,
-  slowestStruck,
   StageClock,
   stageDeadline,
+  targetFor,
+  thinFor,
   trimmedMean,
 } from '../src/deadline.js';
 
@@ -29,11 +30,14 @@ function spread(from, to, n) {
   return runs.filter((_, i) => i % 2 === 0).concat(runs.filter((_, i) => i % 2 === 1));
 }
 
+/** Enough identical runs that neither the trim nor the thin margin has anything to do. */
+const settled = (ms) => Array(CLOCK.CONFIDENT_N + 2).fill(ms);
+
 // --- the average -------------------------------------------------------------------
 
 test('trimmed mean throws away the extremes once there are enough to throw away', () => {
   // Ten samples: 10% off each end drops exactly one from each. The 1 and the 1000 are the
-  // spikes the trim exists for — without them the mean is 5, with them it is over 100.
+  // spikes the trim exists for; without them the mean is 5, with them it is over 100.
   assert.equal(
     trimmedMean([1, 3, 4, 5, 5, 5, 6, 7, 8, 1000]),
     (3 + 4 + 5 + 5 + 5 + 6 + 7 + 8) / 8,
@@ -55,6 +59,15 @@ test('the trim is order-independent', () => {
 
 test('a trim that would drop everything falls back to the whole set', () => {
   assert.equal(trimmedMean([10, 20], 0.5), 15);
+});
+
+test('the quantile interpolates, and one sample is every quantile of itself', () => {
+  assert.equal(quantile([10, 20, 30, 40, 50], 0.5), 30);
+  assert.equal(quantile([10, 20, 30, 40, 50], 0.75), 40);
+  assert.equal(quantile([10, 20], 0.75), 17.5, 'between two samples, by position');
+  assert.equal(quantile([42], 0.1), 42);
+  assert.equal(quantile([42], 0.9), 42);
+  assert.equal(quantile([], 0.5), null);
 });
 
 // --- no data, no deadline ----------------------------------------------------------
@@ -82,52 +95,73 @@ test('clearing one stage puts no clock on any other', () => {
   assert.equal(stageDeadline(3, times), null);
 });
 
-// --- the margin, up to par ----------------------------------------------------------
+// --- the margin ----------------------------------------------------------------------
 
-test('slack opens at SLACK_START and reaches exactly 1.0 at par', () => {
+test('slack opens at SLACK_START and settles at SLACK_END from par on', () => {
   assert.equal(slackFor(1), CLOCK.SLACK_START);
   assert.equal(slackFor(1), 1.4, 'the stated 40% for the first stages');
-  assert.ok(Math.abs(slackFor(CLOCK.PAR_STAGE) - 1) < 1e-9, 'no margin at par');
+  assert.ok(Math.abs(slackFor(CLOCK.PAR_STAGE) - CLOCK.SLACK_END) < 1e-9);
+  assert.equal(slackFor(CLOCK.PAR_STAGE + 40), CLOCK.SLACK_END);
 });
 
-test('slack falls steadily and then holds at 1.0 — it never goes under', () => {
+test('the margin never reaches 1.0, because a margin of 1.0 is a ratchet', () => {
+  // The record is clears only, and a clear is always under the deadline it was played
+  // against. Quote the record back at exactly 1.0 and every filed run lowers the next
+  // deadline, which admits only faster runs, and so on down to the fastest clear anyone
+  // ever had. SLACK_END above 1 is what gives the quote somewhere to settle.
+  assert.ok(CLOCK.SLACK_END > 1, `SLACK_END is ${CLOCK.SLACK_END}`);
+
   let previous = Infinity;
   for (let stage = 1; stage <= 80; stage++) {
     const slack = slackFor(stage);
     assert.ok(slack <= previous + 1e-12, `slack must not rise at stage ${stage}`);
-    assert.ok(slack >= 1 - 1e-12, `slack must never drop below 1.0 (stage ${stage})`);
+    assert.ok(slack >= CLOCK.SLACK_END - 1e-12, `slack fell under SLACK_END at stage ${stage}`);
     previous = slack;
   }
-  assert.equal(slackFor(CLOCK.PAR_STAGE + 40), 1);
 });
 
-test('an early stage is handed its average plus the margin', () => {
-  // Ten identical 10s runs: the average is unambiguous, so the deadline is just the margin.
-  const times = history(1, Array(10).fill(10000));
+test('an early stage is handed its quote plus the margin', () => {
+  // Enough identical runs that the quote is unambiguous, so the deadline is the margin.
+  const times = history(1, settled(10000));
   assert.equal(expectedTime(1, times), 10000);
-  assert.equal(stageDeadline(1, times), 14000, '10s average, 40% on top');
+  assert.equal(stageDeadline(1, times), 14000, '10s on record, 40% on top');
 });
 
-test('at par the deadline is the average itself', () => {
-  const times = history(CLOCK.PAR_STAGE, Array(10).fill(10000));
-  assert.equal(stageDeadline(CLOCK.PAR_STAGE, times), 10000);
+test('at par the deadline is the quote plus the resting margin', () => {
+  const times = history(CLOCK.PAR_STAGE, settled(10000));
+  assert.equal(stageDeadline(CLOCK.PAR_STAGE, times), 10000 * CLOCK.SLACK_END);
 });
 
-// --- past par, the average tightens onto the faster runs -----------------------------
+// --- the target: the slow end of the record, easing to the middle past par -------------
 
-test('past par the slowest surviving run is struck off, one more per stage', () => {
-  assert.equal(slowestStruck(CLOCK.PAR_STAGE), 0);
-  assert.equal(slowestStruck(CLOCK.PAR_STAGE + 1), 1);
-  assert.equal(slowestStruck(CLOCK.PAR_STAGE + 7), 7);
-  assert.equal(slowestStruck(CLOCK.PAR_STAGE - 5), 0, 'nothing is struck before par');
+test('the quote reads the slow end of the record, not its average', () => {
+  // Twelve runs from 10s to 21s. The trim takes the 10s and the 21s off; the quote is the
+  // 75th percentile of what survives, which is well above the mean. The average of the
+  // clears is biased fast by construction, since the slow attempts never got filed.
+  const runs = spread(10000, 21000, 12);
+  const counted = runsCounted(5, history(5, runs));
+  assert.equal(counted.length, 10, 'one off each end');
+
+  const quote = expectedTime(5, history(5, runs));
+  assert.equal(quote, quantile(counted, CLOCK.TARGET));
+  assert.ok(quote > trimmedMean(runs), 'and it is above the trimmed mean');
 });
 
-test('the deadline walks down toward the fastest run and stops there', () => {
-  // Twelve runs from 10s to 21s. The trim takes the 10s and the 21s off, leaving 11s..20s.
+test('the target holds up to par, then eases to TARGET_END and stops', () => {
+  assert.equal(targetFor(1), CLOCK.TARGET);
+  assert.equal(targetFor(CLOCK.PAR_STAGE), CLOCK.TARGET);
+  assert.ok(targetFor(CLOCK.PAR_STAGE + 1) < CLOCK.TARGET, 'it starts moving past par');
+
+  const end = CLOCK.PAR_STAGE + CLOCK.TIGHTEN_STAGES;
+  assert.ok(Math.abs(targetFor(end) - CLOCK.TARGET_END) < 1e-9);
+  assert.equal(targetFor(end + 40), CLOCK.TARGET_END, 'and never below it');
+  assert.ok(CLOCK.TARGET_END >= 0.5, 'the late game aims at a typical clear, never a freak one');
+});
+
+test('past par the deadline tightens stage by stage and then holds', () => {
   const runs = spread(10000, 21000, 12);
   const seen = [];
-
-  for (let step = 0; step <= 14; step++) {
+  for (let step = 0; step <= CLOCK.TIGHTEN_STAGES + 5; step++) {
     const stage = CLOCK.PAR_STAGE + step;
     seen.push(stageDeadline(stage, history(stage, runs)));
   }
@@ -135,63 +169,87 @@ test('the deadline walks down toward the fastest run and stops there', () => {
   for (let i = 1; i < seen.length; i++) {
     assert.ok(seen[i] <= seen[i - 1] + 1e-9, `the deadline must not loosen at step ${i}`);
   }
-
-  // Ten survive the trim, so by ten stages past par only the fastest of them is left.
-  const trimmedFastest = 11000;
-  assert.equal(seen.at(-1), trimmedFastest, 'it arrives at the fastest surviving run');
-  assert.ok(seen[0] > trimmedFastest, 'having started at the average of all of them');
+  assert.ok(seen.at(-1) < seen[0], 'it really does tighten');
+  assert.equal(seen.at(-1), seen.at(-3), 'and holds once the target has settled');
 });
 
-test('what is left standing is always a run the player actually recorded', () => {
-  // The point of striking runs rather than shrinking a multiplier: the tightest deadline
-  // reachable is a time already on the record, so it can never describe an impossible one.
-  const runs = spread(12000, 30000, 10);
-  for (let step = 0; step <= 30; step++) {
+test('what is asked for is always a run the record has plenty of', () => {
+  // The old late game walked to the single fastest surviving run. This one stops at the
+  // median of the trimmed clears times the resting margin, so at least half the clears on
+  // record beat the deadline outright, before the margin is even counted.
+  const runs = spread(12000, 30000, 20);
+  for (let step = 0; step <= 40; step++) {
     const stage = CLOCK.PAR_STAGE + step;
+    const counted = runsCounted(stage, history(stage, runs));
     const deadline = stageDeadline(stage, history(stage, runs));
-    assert.ok(
-      deadline >= Math.min(...runsCounted(stage, history(stage, runs))),
-      `stage ${stage} asked for better than anything on record`,
-    );
+    const median = quantile(counted, 0.5);
+    assert.ok(deadline >= median * CLOCK.SLACK_END - 1e-9, `stage ${stage} undercut the median`);
   }
 });
 
-test('the last run is never struck, however far past par the stage is', () => {
-  const runs = spread(12000, 30000, 10);
-  const far = CLOCK.PAR_STAGE + 500;
-  assert.equal(runsCounted(far, history(far, runs)).length, 1);
-  assert.ok(stageDeadline(far, history(far, runs)) > 0);
-});
-
 test('the freak fast run is trimmed off, so it never becomes the target', () => {
-  // Ten ordinary runs and one that will never happen again. Deep past par the deadline
-  // converges on the fastest *ordinary* run, not on the fluke.
+  // Ten ordinary runs and one that will never happen again. Deep past par the quote sits
+  // on the ordinary runs, not on the fluke.
   const runs = [...Array(10).fill(20000), 1000];
   const stage = CLOCK.PAR_STAGE + 20;
   const counted = runsCounted(stage, history(stage, runs));
 
-  assert.deepEqual(counted, [20000], 'the 1s run was thrown out with the extremes');
-  assert.equal(stageDeadline(stage, history(stage, runs)), 20000);
+  assert.ok(!counted.includes(1000), 'the 1s run was thrown out with the extremes');
+  assert.equal(quotedTime(stage, history(stage, runs)), 20000 * thinFor(counted.length));
 });
 
-test('a stage with one clear is measured against that clear, par or not', () => {
-  const early = history(2, [40000]);
-  assert.ok(stageDeadline(2, early) > 40000, 'early it gets a margin on top');
+// --- thin records are quoted wide ------------------------------------------------------
 
-  const late = history(CLOCK.PAR_STAGE + 9, [40000]);
-  assert.equal(stageDeadline(CLOCK.PAR_STAGE + 9, late), 40000, 'late it gets exactly it');
+test('a record of one run is quoted wide, and the width tapers off as runs arrive', () => {
+  assert.equal(thinFor(0), 1 + CLOCK.THIN_MARGIN);
+  assert.ok(thinFor(1) < thinFor(0));
+  assert.ok(thinFor(5) < thinFor(1));
+  assert.equal(thinFor(CLOCK.CONFIDENT_N), 1, 'at CONFIDENT_N it is the plain quote');
+  assert.equal(thinFor(CLOCK.CONFIDENT_N + 200), 1, 'and it never goes under 1');
+});
+
+test('a stage with one clear is measured against that clear, widened', () => {
+  // One expert's debut clear is not a par. It is quoted with the thin margin on top, so the
+  // second person through is not asked to match the first one's time plus nothing.
+  const early = history(2, [40000]);
+  assert.equal(expectedTime(2, early), 40000 * thinFor(1));
+  assert.equal(stageDeadline(2, early), 40000 * thinFor(1) * slackFor(2));
+
+  const stage = CLOCK.PAR_STAGE + 9;
+  const late = history(stage, [40000]);
+  assert.equal(stageDeadline(stage, late), 40000 * thinFor(1) * CLOCK.SLACK_END);
+  assert.ok(stageDeadline(stage, late) > 40000, 'past par it is still not "beat it again"');
+});
+
+test('the thin margin is gone once the record is deep enough for the trim to work', () => {
+  assert.equal(CLOCK.CONFIDENT_N, Math.ceil(1 / CLOCK.TRIM), 'the two are the same threshold');
+  const times = history(4, settled(20000));
+  assert.equal(expectedTime(4, times), 20000, 'no width on a settled record');
+});
+
+// --- the floor ----------------------------------------------------------------------------
+
+test('no deadline is ever shorter than FLOOR_MS', () => {
+  // A three-rope stage clears in two seconds once you know the game and takes a first-timer
+  // ten to read. The record can only say the first; the floor says the second.
+  const quick = history(1, settled(2000));
+  assert.equal(stageDeadline(1, quick), CLOCK.FLOOR_MS);
+  assert.equal(stageDeadline(1, {}, { 1: 2000 }), CLOCK.FLOOR_MS, 'pooled or not');
+
+  const slow = history(20, settled(30000));
+  assert.ok(stageDeadline(20, slow) > CLOCK.FLOOR_MS, 'and it never touches a real par');
 });
 
 // --- the model follows the player ----------------------------------------------------
 
 test('getting faster tightens the deadline', () => {
   const stage = 10;
-  const slow = history(stage, Array(10).fill(60000));
-  const fast = history(stage, Array(10).fill(30000));
+  const slow = history(stage, settled(60000));
+  const fast = history(stage, settled(30000));
   assert.ok(stageDeadline(stage, fast) < stageDeadline(stage, slow));
 });
 
-test('board size is not an input — only the times are', () => {
+test('board size is not an input, only the times are', () => {
   // Two stages, same recorded times, same stage number: the same deadline, whatever the
   // boards looked like. There is nothing in the model that could tell them apart.
   const a = history(12, [20000, 22000, 24000]);
@@ -308,7 +366,7 @@ test('a finished duration is reported without the countdown tenths', () => {
 
 // --- the shared pool -------------------------------------------------------------------
 
-/** A par table as the server sends it: stage -> already-expected ms. */
+/** A par table as the server sends it: stage -> already-quoted ms. */
 const pars = (stage, ms) => ({ [String(stage)]: ms });
 
 test('the pool times a stage this player has never cleared', () => {
@@ -323,13 +381,13 @@ test('a stage nobody at all has cleared is still untimed', () => {
   assert.equal(stageDeadline(80, {}, {}), null);
 });
 
-test('the pool answers ahead of the player, and the player answers without it', () => {
-  // Their own runs are the fast ones here, so the floor cannot be what decides this — the
-  // pooled par is genuinely being preferred to a personal average that disagrees with it.
-  const mine = history(10, [12000, 10000, 11000]);
-  assert.equal(stageDeadline(10, mine, pars(10, 20000)), 20000 * slackFor(10));
-  // Same call with an empty table is the offline path, and it is the old behaviour intact.
-  assert.equal(stageDeadline(10, mine, {}), expectedTime(10, mine) * slackFor(10));
+test('the pool is quoted by exactly the model the device is', () => {
+  // The server runs pooledTime over the raw pool and ships the answer; the client runs
+  // expectedTime over its own history. They have to be the same three steps, or the two
+  // populations are being asked different questions.
+  const runs = spread(15000, 40000, 30);
+  assert.equal(pooledTime(9, { 9: runs }), expectedTime(9, { 9: runs }));
+  assert.equal(pooledTime(9, {}), null);
 });
 
 test('a malformed par is ignored rather than producing a NaN deadline', () => {
@@ -340,71 +398,41 @@ test('a malformed par is ignored rather than producing a NaN deadline', () => {
   }
 });
 
-test('poolFraction traces the same curve slowestStruck does, as a fraction', () => {
-  assert.equal(poolFraction(1), 1, 'nothing struck before par');
-  assert.equal(poolFraction(CLOCK.PAR_STAGE), 1);
-  // At each stage past par the personal model strikes one more of CLOCK.KEEP runs. The
-  // pooled fraction has to be that same proportion or the late game stops biting.
-  for (let stage = CLOCK.PAR_STAGE; stage <= CLOCK.PAR_STAGE + CLOCK.KEEP; stage++) {
-    const expected = Math.max(1 / CLOCK.KEEP, 1 - slowestStruck(stage) / CLOCK.KEEP);
-    assert.equal(poolFraction(stage), expected, `stage ${stage}`);
-  }
-});
-
-test('the pooled slice bottoms out and holds, however far past par', () => {
-  const floor = poolFraction(CLOCK.PAR_STAGE + CLOCK.KEEP);
-  assert.equal(floor, 1 / CLOCK.KEEP);
-  assert.equal(poolFraction(CLOCK.PAR_STAGE + CLOCK.KEEP + 40), floor, 'never below it');
-});
-
-test('a large pool still tightens past par — the count-based rule would not', () => {
-  // The bug this exists to prevent: striking `stage - PAR` runs off 400 samples is a 0.25%
-  // change, and the entire late-game curve silently flattens once the pool is big enough.
-  // The same 400 runs filed against two stages, so the only difference is the slice.
+test('a large pool still tightens past par', () => {
+  // The same 400 runs filed against two stages, so the only difference is the target.
   const samples = spread(20000, 60000, 400);
-  const pool = { [CLOCK.PAR_STAGE]: samples, [CLOCK.PAR_STAGE + 10]: samples };
+  const pool = { [CLOCK.PAR_STAGE]: samples, [CLOCK.PAR_STAGE + CLOCK.TIGHTEN_STAGES]: samples };
   const early = pooledTime(CLOCK.PAR_STAGE, pool);
-  const late = pooledTime(CLOCK.PAR_STAGE + 10, pool);
-  assert.ok(late < early * 0.9, `expected a real tightening, got ${late} vs ${early}`);
+  const late = pooledTime(CLOCK.PAR_STAGE + CLOCK.TIGHTEN_STAGES, pool);
+  assert.ok(late < early * 0.95, `expected a real tightening, got ${late} vs ${early}`);
+  assert.equal(late, quantile(runsCounted(CLOCK.PAR_STAGE, pool), CLOCK.TARGET_END));
+  assert.ok(late >= quantile(runsCounted(CLOCK.PAR_STAGE, pool), 0.5), 'never under the median');
 });
 
-test('the pooled slice takes the fastest runs, never the slowest', () => {
-  const pool = { 45: spread(10000, 90000, 200) };
-  const runs = pooledRuns(45, pool);
-  assert.ok(runs.length < 200, 'a slice, not the lot');
-  assert.deepEqual(runs, [...runs].sort((a, b) => a - b), 'fastest first');
-  assert.ok(Math.max(...runs) < 50000, 'and it is the fast end that survives');
+test('a pool of one is measured against that one run, widened', () => {
+  assert.equal(pooledTime(3, { 3: [25000] }), 25000 * thinFor(1));
+  assert.ok(pooledTime(3, { 3: [25000] }) > 25000);
 });
 
-test('a pool of one is measured against that one run', () => {
-  assert.equal(pooledTime(3, { 3: [25000] }), 25000);
-  assert.equal(pooledTime(3, {}), null);
-  assert.deepEqual(pooledRuns(3, {}), []);
+// --- when both the pool and the device answer -------------------------------------------
+
+test('the looser of the two quotes is the deadline', () => {
+  // The invariant the personal model got for free: nobody is asked for more than their own
+  // record shows they can do. And the other way: a player faster than the pool is quoted
+  // the pool's time rather than their own.
+  const mine = history(50, settled(30000));
+  assert.equal(stageDeadline(50, mine, pars(50, 5000)), 30000 * CLOCK.SLACK_END, 'own wins');
+  assert.equal(stageDeadline(50, mine, pars(50, 45000)), 45000 * CLOCK.SLACK_END, 'pool wins');
 });
 
-// --- the floor the pool cost us --------------------------------------------------------
-
-test('a pooled deadline is never tighter than a run this player has already hit', () => {
-  // The invariant the personal model got for free: the tightest deadline reachable is a
-  // time they have proved. OWN_FLOOR is that guarantee put back by hand.
-  const mine = history(50, [30000, 32000, 31000]);
-  const brutal = stageDeadline(50, mine, pars(50, 5000));
-  assert.equal(brutal, 30000, 'floored at their best, not the pool s 5s');
+test('the comparison is made before the margin, so the margin is applied once', () => {
+  const mine = history(12, settled(30000));
+  assert.equal(stageDeadline(12, mine, pars(12, 45000)), 45000 * slackFor(12));
 });
 
-test('the floor only ever loosens — a reachable pooled deadline stands', () => {
-  const mine = history(12, [30000, 32000, 31000]);
-  const generous = stageDeadline(12, mine, pars(12, 45000));
-  assert.equal(generous, 45000 * slackFor(12), 'well above their best, so untouched');
-});
-
-test('the floor cannot help on a stage the player has never cleared', () => {
+test('the pool alone decides on a stage the player has never cleared', () => {
   // Worth pinning because it is the real cost of pooling rather than an oversight: there
-  // is no proved time to floor against, so the pool s number stands unguarded.
-  assert.equal(stageDeadline(50, {}, pars(50, 5000)), 5000 * slackFor(50));
-});
-
-test('the floor reads the fastest clear, not the most recent', () => {
-  const mine = history(50, [28000, 60000, 55000]);
-  assert.equal(stageDeadline(50, mine, pars(50, 1000)), 28000);
+  // is no own record to compare against, so the pool's number stands. The thin margin the
+  // server applied and the floor are what protect a new player here.
+  assert.equal(stageDeadline(50, {}, pars(50, 9000)), 9000 * CLOCK.SLACK_END);
 });

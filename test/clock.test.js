@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { CLOCK } from '../src/config.js';
-import { slackFor, stageDeadline } from '../src/deadline.js';
+import { slackFor, stageDeadline, thinFor } from '../src/deadline.js';
 import { Game } from '../src/game.js';
 import { Rope } from '../src/rope.js';
 import { TangleTracker } from '../src/tangle.js';
@@ -530,9 +530,8 @@ test('the clock a stage is given is the one its own clear earned it', () => {
   // The whole loop, end to end and through the real Game: an untimed debut is played, the
   // time it took is filed, and that time is what the next attempt is measured against.
   //
-  // With exactly one sample on record the two halves of the blend agree — the stage's own
-  // mean and the general pace are both that clear — so the deadline comes out as the time
-  // it took times this stage's slack, with nothing to approximate.
+  // One run on record is quoted as itself, widened by the thin margin a single sample
+  // carries, times this stage's slack. Nothing to approximate.
   const times = {};
   const game = makeGame({ limit: null, times, stage: 5 });
 
@@ -543,13 +542,15 @@ test('the clock a stage is given is the one its own clear earned it', () => {
 
   const took = times['5'][0];
   const next = stageDeadline(5, times);
-  assert.ok(Math.abs(next - took * slackFor(5)) < 1, `got ${next} for a ${took}ms clear`);
+  const expected = Math.max(CLOCK.FLOOR_MS, took * thinFor(1) * slackFor(5));
+  assert.ok(Math.abs(next - expected) < 1, `got ${next} for a ${took}ms clear`);
   assert.ok(next > took, 'and stage 5 is early enough to still be handed a margin');
 });
 
-test('past par a stage is handed exactly the clear that taught it, and no margin', () => {
-  // One run on record and past par, so there is no margin to add and nothing slower to
-  // strike off: the deadline is that run. Beating it again is the whole ask.
+test('past par a stage is still handed a margin on the clear that taught it', () => {
+  // One run on record and past par. The old model handed back exactly that run, so the
+  // ask was "beat your only clear"; a clear is by definition under the deadline it was
+  // played against, so that ask only ever tightened. The resting margin is what remains.
   const stage = CLOCK.PAR_STAGE + 10;
   const times = {};
   const game = makeGame({ limit: null, times, stage });
@@ -559,6 +560,6 @@ test('past par a stage is handed exactly the clear that taught it, and no margin
   clear(game, 2);
 
   const took = times[String(stage)][0];
-  assert.equal(stageDeadline(stage, times), took, 'no margin past par');
-  assert.equal(slackFor(stage), 1);
+  assert.ok(stageDeadline(stage, times) > took, 'a margin past par');
+  assert.equal(slackFor(stage), CLOCK.SLACK_END);
 });

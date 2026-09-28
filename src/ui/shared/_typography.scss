@@ -1,31 +1,42 @@
 /**
  * The handful of text treatments that appear on more than one panel.
  *
- * A Sass partial rather than a component, because none of these are things — they are how
+ * A Sass partial rather than a component, because none of these are things; they are how
  * a paragraph looks. Each component that `@use`s this gets its own copy inside its own
  * shadow root, which is the trade shadow DOM asks for: a few duplicated rules in exchange
  * for no component being able to restyle another one's prose.
  */
 
+/* The line above a headline that says what kind of panel this is. Quiet, sentence case. */
 .eyebrow {
-  margin: 0 0 6px;
-  font-size: 11px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 500;
   color: var(--muted);
+}
+
+/* The name of the moment: the title, CLEARED, the reason a run ended. */
+.headline {
+  margin: 0;
+  font-family: var(--display);
+  font-size: clamp(34px, 8vw, 52px);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--ink);
 }
 
 .lede {
   margin: 0 0 26px;
-  color: var(--muted);
-  line-height: 1.65;
-  font-size: 14px;
+  color: var(--ink-2);
+  line-height: 1.6;
+  font-size: 15px;
 }
 
 .hint {
   margin: 18px 0 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 13px;
   /* Reserved even when empty: the best-run line is filled in after the panel is up, and
      without this the whole card jumps the first time a player has a run to show. */
   min-height: 1em;
@@ -34,8 +45,11 @@
 /* A number big enough to be the reason the panel exists. */
 .bigscore {
   margin: 0 0 22px;
-  font-family: var(--mono);
-  font-size: 52px;
+  font-family: var(--display);
+  font-size: 56px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
   color: var(--accent);
 }

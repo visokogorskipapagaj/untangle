@@ -9,14 +9,8 @@
   display: none;
 }
 
-/* The panel's prose is ragged left, but the stage number over it is a caption for the whole
-   card rather than the first line of it. */
-.eyebrow {
-  text-align: center;
-}
-
 /**
- * One card per mechanic, all of them in the panel, one of them visible — and the same
+ * One card per mechanic, all of them in the panel, one of them visible, and the same
  * attribute hides the line inside a card that does not apply, which is how the clock
  * briefing carries both a timed and an untimed answer.
  *
@@ -27,14 +21,14 @@
   display: none;
 }
 
+/* A heading rather than a paragraph, so the paragraph rule below cannot outrank it. */
 .brief__title {
-  margin: 0 0 18px;
-  text-align: center;
-  font-size: clamp(24px, 6vw, 34px);
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-indent: 0.16em;
-  line-height: 1.15;
+  margin: 0 0 16px;
+  font-family: var(--display);
+  font-size: clamp(30px, 7vw, 40px);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
 }
 
 /* Same measure and colour as `.lede`, which is the other place this game writes paragraphs.
@@ -42,9 +36,10 @@
    sized for being the only one. */
 .brief p {
   margin: 0 0 14px;
-  color: var(--muted);
-  line-height: 1.65;
-  font-size: 14px;
+  max-width: 62ch;
+  color: var(--ink-2);
+  line-height: 1.6;
+  font-size: 15px;
 }
 
 .brief p:last-child {
@@ -59,7 +54,8 @@
 }
 
 .brief .num {
-  font-family: var(--mono);
+  font-family: var(--display);
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--ink);
 }
@@ -71,5 +67,6 @@
 }
 
 .actions {
-  margin-top: 26px;
+  margin-top: 28px;
+  justify-content: flex-start;
 }

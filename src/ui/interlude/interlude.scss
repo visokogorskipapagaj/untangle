@@ -11,10 +11,9 @@
 
 /**
  * The hold, as a level rather than a number: the panel is washed in 10% white, and the wash
- * drains from the top edge to the bottom across the three seconds — which used to sit there
- * with nothing saying how long three seconds was. Anchored to the bottom so the level
- * *falls*: what is left of the tint is what is left of the time. setCountdown writes the
- * scale.
+ * drains from the top edge to the bottom across the three seconds. Anchored to the bottom
+ * so the level *falls*: what is left of the tint is what is left of the time. setCountdown
+ * writes the scale.
  */
 .timer {
   position: absolute;
@@ -38,62 +37,58 @@
 }
 
 /* Everything else, above the wash. Without a stacking position of its own the absolutely
-   positioned timer paints over the text — neither is positioned otherwise, and the timer
+   positioned timer paints over the text: neither is positioned otherwise, and the timer
    wins on paint order. */
 .body {
   position: relative;
 }
 
 .headline {
-  margin: 0;
-  font-size: clamp(30px, 7vw, 44px);
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-indent: 0.16em;
-  line-height: 1.15;
+  font-size: clamp(30px, 7vw, 40px);
 }
 
-/* What the stage paid. The headline of the card the player is actually reading — CLEARED! is
-   a label, this is the news — so it is the biggest thing on it. */
+/* What the stage paid. "Cleared" is the label, this is the news, so it is the biggest thing
+   on the card. */
 .points {
-  margin: 14px 0 0;
-  font-family: var(--mono);
-  font-size: clamp(42px, 10vw, 60px);
+  margin: 12px 0 0;
+  font-family: var(--display);
+  font-size: clamp(48px, 12vw, 72px);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
-  line-height: 1.05;
   color: var(--accent);
 }
 
 /* The run so far, deliberately quieter: it is context for the number above it. */
 .total {
-  margin: 8px 0 0;
-  font-size: 13px;
+  margin: 10px 0 0;
+  font-size: 14px;
   color: var(--muted);
 }
 
 .total span {
-  font-family: var(--mono);
+  font-family: var(--display);
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   font-size: 17px;
   color: var(--ink);
 }
 
-/* Inside the modal, under the text, and at the size every other button on a panel is: they
-   used to float over the board on their own, where matching the HUD's 34px icon buttons was
-   what kept them from looking like a second button system. */
+/* Inside the modal, under the text, and at the size every other button on a panel is. */
 .actions {
-  margin-top: 26px;
+  margin-top: 28px;
 }
 
 /* Wide enough for "Resume", which is the longer of the two labels it carries. Without it the
-   row re-centres itself the moment the game is held, and the green button beside it — the
-   one thing on the panel the player is aiming at — slides out from under the cursor. */
+   row re-centres itself the moment the game is held, and the green button beside it, the
+   one thing on the panel the player is aiming at, slides out from under the cursor. */
 .pause {
-  min-width: 130px;
+  min-width: 134px;
 }
 
 /* One button, two icons, and `paused` on this component decides which. Keeping both mounted
-   is what lets the label live in a span instead of in the button's text — see setPaused,
+   is what lets the label live in a span instead of in the button's text; see setPaused,
    which would otherwise have to rebuild the icon on every toggle. */
 .icon-play {
   display: none;

@@ -1,23 +1,30 @@
 <header class="bar">
-  <div class="group">
-    <u-stat variant="stage" label="Stage" value="1" data-stat="stage"></u-stat>
+  <div class="group group--left">
+    <u-stat variant="stage" label="stage" value="1" data-stat="stage"></u-stat>
+    <u-stat variant="knots" label="knots" value="0" data-stat="knots"></u-stat>
   </div>
 
   <div class="group group--center">
     <!-- Starts untimed, which is also the resting state: the first frame of a stage with no
          record would otherwise flash a bright infinity sign before setStats dims it. -->
-    <u-stat variant="time" label="Time" value="&infin;" state="untimed" data-stat="time"></u-stat>
-    <u-stat variant="knots" label="Knots" value="0" data-stat="knots"></u-stat>
-    <u-stat variant="moves" label="Moves" value="0" delta="cost" data-stat="movesLeft"></u-stat>
-    <u-stat variant="bank" label="Bank" value="0" delta="gain" data-stat="bank"></u-stat>
+    <u-stat variant="time" label="time" value="&infin;" state="untimed" data-stat="time"></u-stat>
   </div>
 
-  <div class="group group--right">
-    <u-stat variant="score" label="Score" value="0" data-stat="score"></u-stat>
-    <u-icon-button label="Restart stage" title="Restart stage (R)" data-action="restart-stage">
-      <u-icon name="reload"></u-icon>
-    </u-icon-button>
-    <!-- The one control still drawn as a codepoint rather than as artwork. -->
-    <u-icon-button label="Settings" data-action="settings">&#9881;</u-icon-button>
+  <!-- One grid cell on a wide screen; on a phone `.right` dissolves and its two halves take
+       cells of their own, the readouts on a second row and the tools beside the clock. -->
+  <div class="right">
+    <div class="group group--right">
+      <u-stat variant="moves" label="moves" value="0" delta="cost" data-stat="movesLeft"></u-stat>
+      <u-stat variant="bank" label="bank" value="0" delta="gain" data-stat="bank"></u-stat>
+      <u-stat variant="score" label="score" value="0" data-stat="score"></u-stat>
+    </div>
+    <div class="tools">
+      <u-icon-button label="Restart stage" title="Restart stage (R)" data-action="restart-stage">
+        <u-icon name="reload"></u-icon>
+      </u-icon-button>
+      <u-icon-button label="Settings" title="Settings" data-action="settings">
+        <u-icon name="settings"></u-icon>
+      </u-icon-button>
+    </div>
   </div>
 </header>

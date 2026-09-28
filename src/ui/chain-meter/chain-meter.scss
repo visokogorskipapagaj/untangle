@@ -1,17 +1,21 @@
 /**
  * The chain window. Collapses inward from both ends as the time to land the next move runs
- * out — a timed combo the player cannot see the clock on is just a mystery. Centred and
+ * out; a timed combo the player cannot see the clock on is just a mystery. Centred and
  * wide so it reads peripherally, without pulling the eye off the ropes.
+ *
+ * Drawn as a cord rather than a bar: a diagonal twist across the fill, which is the one
+ * place the interface borrows the board's own vocabulary.
  */
 :host {
   position: absolute;
-  top: 64px;
+  top: 76px;
   left: 50%;
-  width: 75%;
-  height: 4px;
-  margin-left: -37.5%;
-  border-radius: 3px;
-  background: rgba(232, 236, 244, 0.09);
+  width: 60%;
+  max-width: 520px;
+  height: 5px;
+  transform: translateX(-50%);
+  border-radius: var(--radius-pill);
+  background: rgba(232, 236, 244, 0.08);
   opacity: 0;
   transition: opacity 0.15s;
   pointer-events: none;
@@ -25,8 +29,14 @@
 i {
   display: block;
   height: 100%;
-  border-radius: 3px;
-  background: var(--accent);
+  border-radius: var(--radius-pill);
+  background: repeating-linear-gradient(
+    115deg,
+    var(--accent) 0 7px,
+    rgba(5, 19, 13, 0.35) 7px 10px
+  );
+  background-color: var(--accent);
+  box-shadow: 0 0 10px rgba(94, 230, 168, 0.35);
   /* Scaled about the centre, so it shrinks from both sides rather than draining one way. */
   transform-origin: center center;
   will-change: transform;
@@ -35,23 +45,27 @@ i {
 /* Priming: the starter is half done and the clock is running, but nothing is at stake yet.
    Thin and muted, so the bar reads as a countdown rather than a pot. */
 :host([priming]) {
-  height: 2px;
-  opacity: 0.55;
+  height: 3px;
+  opacity: 0.6;
 }
 
 :host([priming]) i {
   background: rgba(159, 180, 216, 0.75);
+  box-shadow: none;
 }
 
 /* Deep into a chain the window is tightest, so it runs hot rather than staying calm. */
 :host([hot]) i {
-  background: var(--amber);
+  background: repeating-linear-gradient(115deg, var(--amber) 0 7px, rgba(60, 40, 0, 0.35) 7px 10px);
+  background-color: var(--amber);
+  box-shadow: 0 0 12px rgba(255, 209, 102, 0.45);
 }
 
 /* Final sliver: it goes red and buzzes, because at this point the player has a couple of
    frames to react and a colour change alone is easy to miss mid-drag. */
 :host([critical]) i {
   background: var(--warn);
+  box-shadow: 0 0 12px rgba(255, 122, 107, 0.6);
 }
 
 :host([critical]) {
@@ -59,17 +73,18 @@ i {
 }
 
 /* CURSED COMBO: the window burns down twice as fast, so the meter must stop reading as the
-   same meter. It doubles in height and blinks — a hard step, not a fade, because a smooth
+   same meter. It doubles in height and blinks, a hard step, not a fade, because a smooth
    pulse is exactly what the eye stops noticing. Declared after [critical] so it wins the
    equal-specificity tie; the two states compose in the combined rule below. */
 :host([cursed]) {
-  height: 8px;
+  height: 9px;
   animation: chain-blink 280ms steps(1, end) infinite;
 }
 
 :host([cursed]) i {
-  background: var(--warn);
-  box-shadow: 0 0 12px rgba(255, 122, 107, 0.9);
+  background: repeating-linear-gradient(115deg, var(--warn) 0 7px, rgba(60, 0, 0, 0.45) 7px 10px);
+  background-color: var(--warn);
+  box-shadow: 0 0 14px rgba(255, 122, 107, 0.9);
 }
 
 /* Both at once: blink on opacity, buzz on transform, so neither animation clobbers the
@@ -83,16 +98,16 @@ i {
 @keyframes chain-buzz {
   0%,
   100% {
-    transform: translate(0, 0);
+    transform: translate(-50%, 0);
   }
   25% {
-    transform: translate(-3px, 1px);
+    transform: translate(calc(-50% - 3px), 1px);
   }
   50% {
-    transform: translate(3px, -1px);
+    transform: translate(calc(-50% + 3px), -1px);
   }
   75% {
-    transform: translate(-2px, -1px);
+    transform: translate(calc(-50% - 2px), -1px);
   }
 }
 
@@ -104,6 +119,14 @@ i {
   50%,
   100% {
     opacity: 0.28;
+  }
+}
+
+@media (max-width: 600px) {
+  /* Under the HUD's second row. */
+  :host {
+    top: 98px;
+    width: 72%;
   }
 }
 

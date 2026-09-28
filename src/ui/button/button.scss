@@ -7,31 +7,44 @@
 }
 
 /* Always a flex row with a gap, whether or not there is an icon in it. A button that leads
-   with an icon and keeps its label is the common case here — "Retry stage" and "Back to
+   with an icon and keeps its label is the common case here: "Retry stage" and "Back to
    stage 1" carry the same reload icon and mean quite different things, one replaying the
    board and the other throwing the run away, so the icon decorates the label rather than
    replacing it. With no icon the gap simply has nothing to sit between. */
 .btn {
   appearance: none;
   width: 100%;
+  min-height: 46px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 11px 22px;
-  border-radius: 10px;
-  border: 1px solid var(--line);
-  background: transparent;
+  gap: 9px;
+  padding: 0 24px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line-strong);
+  background: var(--chip);
   color: var(--ink);
-  font: inherit;
-  font-size: 14px;
+  font-family: var(--display);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1;
   cursor: pointer;
   transition:
-    background 0.15s,
-    border-color 0.15s;
+    background var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
+    transform var(--dur-fast) ease;
 
   &:hover {
-    background: rgba(232, 236, 244, 0.07);
+    background: var(--chip-hover);
+  }
+
+  &:active {
+    transform: scale(0.97);
+  }
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: var(--focus);
   }
 }
 
@@ -39,22 +52,24 @@
 :host([variant='primary']) .btn {
   background: var(--accent);
   border-color: var(--accent);
-  color: #05130d;
-  font-weight: 600;
+  color: var(--accent-ink);
+  font-weight: 700;
 
   &:hover {
-    background: #74f0b8;
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
   }
 }
 
 /* Rip & Tear. It skips thirty stages of ramp, so it should not look like the safe one. */
 :host([variant='danger']) .btn {
-  border-color: var(--warn);
+  border-color: rgba(255, 122, 107, 0.6);
   color: var(--warn);
-  font-weight: 600;
+  background: transparent;
 
   &:hover {
-    background: rgba(255, 122, 107, 0.14);
+    background: rgba(255, 122, 107, 0.12);
+    border-color: var(--warn);
   }
 }
 
@@ -65,7 +80,7 @@
 
 /**
  * Held: the button is not merely available, it is *doing* something, and the rest of the
- * screen expresses that by not moving — which is exactly what a long phase looks like
+ * screen expresses that by not moving, which is exactly what a long phase looks like
  * anyway. So the control that did it breathes.
  *
  * Animated on the stroke and on a ring outside it. `box-shadow` takes no layout space, so
@@ -95,5 +110,9 @@
   /* The solid stroke and the amber label carry it on their own. */
   :host([held]) .btn {
     animation: none;
+  }
+
+  .btn:active {
+    transform: none;
   }
 }

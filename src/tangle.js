@@ -114,11 +114,17 @@ export class TangleTracker {
 
       const resolved = rec.minSeen - rec.count;
       rec.minSeen = rec.count;
+      // A rope blown off the board keeps its nodes where they were, so measuring against
+      // it reads as a gap of zero: the perfect squeeze the null gap exists to prevent, paid
+      // on every knot the detonation freed. Freed is not squeezed; it scores neutral.
+      const a = this.ropes[rec.i];
+      const b = this.ropes[rec.j];
+      const measurable = rec.count === 0 && !a.removed && !b.removed;
       events.push({
         i: rec.i,
         j: rec.j,
         resolved,
-        gap: rec.count === 0 ? polylineGap(this.ropes[rec.i].nodes, this.ropes[rec.j].nodes) : null,
+        gap: measurable ? polylineGap(a.nodes, b.nodes) : null,
       });
     }
 

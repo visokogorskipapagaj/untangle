@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 import { POOL } from '../src/config.js';
-import { pooledTime, recordClear } from '../src/deadline.js';
+import { pooledTime, recordClear, trimmedMean } from '../src/deadline.js';
 
 /**
  * The shared pool of clear times.
@@ -113,10 +113,10 @@ export class PoolStore {
    * The returned number is what was actually stored, which is not always what was sent —
    * recordClear pulls a submission back toward the stage's typical time before it lands.
    */
-  submit(stage, ms) {
+  submit(stage, ms, typical = null) {
     if (!validSubmission(stage, ms)) return null;
 
-    const stored = recordClear(this.stages, stage, ms, POOL.SERVER_KEEP);
+    const stored = recordClear(this.stages, stage, ms, POOL.SERVER_KEEP, typical);
     const key = String(stage);
     this.counts[key] = (this.counts[key] || 0) + 1;
     // The table this just invalidated is rebuilt on the next read, not here — a burst of
@@ -124,6 +124,20 @@ export class PoolStore {
     this.parsCache = null;
     this.#touch();
     return stored;
+  }
+
+  /**
+   * What a stage typically takes right now, or null with nothing on record.
+   *
+   * Taken once per request and handed to every submit() in it, so a batch is judged
+   * against the pool as it stood before the batch. Judged one at a time, fifty entries
+   * for one stage walk the clamp down with them: each is pulled to a quarter of a mean
+   * the previous entries have already lowered, and five honest minute-long clears went
+   * to six seconds in a single request.
+   */
+  typical(stage) {
+    const samples = this.stages[String(stage)];
+    return samples && samples.length ? trimmedMean(samples) : null;
   }
 
   /**
@@ -156,11 +170,16 @@ export class PoolStore {
    * Not security — an IP is not an identity and anybody determined enough to forge times
    * can forge them from anywhere. This is here so that a stuck client in a retry loop
    * cannot bury the pool under one stage's worth of duplicates by accident.
+   *
+   * `cost` is what a request spends: one for a read or a single time, one per entry for
+   * a batch. Charging per request let a batch of fifty count as one, which was fifty
+   * times the intended budget.
    */
-  allow(ip, now) {
+  allow(ip, now, cost = 1) {
+    if (cost > POOL.RATE_LIMIT) return false;
     const bucket = this.buckets.get(ip);
     if (!bucket || now >= bucket.resetAt) {
-      this.buckets.set(ip, { count: 1, resetAt: now + POOL.RATE_WINDOW_MS });
+      this.buckets.set(ip, { count: cost, resetAt: now + POOL.RATE_WINDOW_MS });
       // Opportunistic sweep: without it the map holds every IP ever seen. Cheap because
       // it only runs on the request that opens a new window.
       if (this.buckets.size > 4096) {
@@ -168,8 +187,8 @@ export class PoolStore {
       }
       return true;
     }
-    if (bucket.count >= POOL.RATE_LIMIT) return false;
-    bucket.count += 1;
+    if (bucket.count + cost > POOL.RATE_LIMIT) return false;
+    bucket.count += cost;
     return true;
   }
 

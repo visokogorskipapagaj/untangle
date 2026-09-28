@@ -7,7 +7,7 @@ import test from 'node:test';
 
 import { CLOCK, POOL } from '../src/config.js';
 import { pooledTime } from '../src/deadline.js';
-import { createApp } from '../server/index.js';
+import { clientIp, createApp } from '../server/index.js';
 import { PoolStore, validSubmission } from '../server/store.js';
 
 /** The shared pool: what the server accepts, what it does with it, and what it hands back. */
@@ -426,4 +426,85 @@ test('the pool window is longer than the personal one, and both are real', () =>
   // pooled percentile as jumpy as a single player's history and nothing would fail.
   assert.ok(POOL.SERVER_KEEP > CLOCK.KEEP * 10);
   assert.ok(POOL.MIN_MS > 0 && POOL.MAX_MS > POOL.MIN_MS);
+});
+
+// --- one request cannot walk the clamp down ------------------------------------------------
+
+test('a batch is clamped against the pool as it stood before the batch', async () => {
+  // Filed one at a time, each entry is pulled to a quarter of a mean the entries before it
+  // have already lowered, and fifty of them take a stage from a minute to a few seconds in
+  // one request. Judged against one snapshot, the batch can only move the par as far as a
+  // single forged entry could.
+  const store = new PoolStore('/dev/null');
+  for (const ms of spread(58000, 62000, 5)) store.submit(9, ms);
+  const before = pooledTime(9, store.stages);
+  // The clamp judges against the trimmed mean, not the quoted par.
+  const floor = store.typical(9) / CLOCK.OUTLIER;
+  const app = await serve(store);
+
+  try {
+    const times = Array.from({ length: 40 }, () => ({ stage: 9, ms: POOL.MIN_MS }));
+    const res = await app.call('/api/times', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ times }),
+    });
+    assert.equal(res.status, 200);
+
+    assert.ok(
+      store.stages['9'].slice(-40).every((ms) => ms >= floor - 1),
+      'every entry was clamped against the same figure',
+    );
+    // Forty forged entries against five honest ones do move the par, but only as far as
+    // the clamp allows a single entry to go: filed one at a time they reached six seconds.
+    assert.ok(pooledTime(9, store.stages) >= floor - 1, 'the par stops at the clamp floor');
+    assert.ok(pooledTime(9, store.stages) < before, 'it is not pretending nothing happened');
+  } finally {
+    await app.close();
+  }
+});
+
+test('a batch spends the rate limit per entry, not per request', async () => {
+  const store = new PoolStore('/dev/null');
+  const app = await serve(store);
+
+  try {
+    const post = (times) =>
+      app.call('/api/times', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ times }),
+      });
+    const batch = (n) => Array.from({ length: n }, () => ({ stage: 3, ms: 20000 }));
+
+    // One request of 50 and one of 9 is exactly the budget; the next entry is over it.
+    assert.equal((await post(batch(POOL.OUTBOX_MAX))).status, 200);
+    assert.equal((await post(batch(POOL.RATE_LIMIT - POOL.OUTBOX_MAX - 1))).status, 200);
+    assert.equal((await post(batch(2))).status, 429, 'fifty-one entries in a minute is too many');
+  } finally {
+    await app.close();
+  }
+});
+
+test('behind a proxy the client address is the entry the proxy appended', () => {
+  // Each proxy appends the address it saw, so the entries to the left of the trusted ones
+  // are whatever the client chose to send. Reading the first entry, as this used to, let a
+  // client pick its own rate-limit bucket on every request.
+  const previous = process.env.UNTANGLE_TRUST_PROXY;
+  const ip = (hops, header) => {
+    process.env.UNTANGLE_TRUST_PROXY = hops;
+    return clientIp({ headers: { 'x-forwarded-for': header }, socket: { remoteAddress: '10.0.0.1' } });
+  };
+  try {
+    assert.equal(ip('1', 'forged, 203.0.113.7'), '203.0.113.7');
+    assert.equal(ip('2', 'forged, 203.0.113.7, 198.51.100.2'), '203.0.113.7', 'two hops, second from the right');
+    assert.equal(ip('1', ''), '10.0.0.1', 'no header, the socket');
+    assert.equal(ip('', 'forged'), '10.0.0.1', 'not trusting the header at all');
+    // Fewer entries than trusted proxies is a chain the proxies did not build, so nothing
+    // in it is trusted and the socket address stands.
+    assert.equal(ip('3', 'a, b'), '10.0.0.1', 'a short chain is not read at all');
+  } finally {
+    if (previous === undefined) delete process.env.UNTANGLE_TRUST_PROXY;
+    else process.env.UNTANGLE_TRUST_PROXY = previous;
+  }
 });
